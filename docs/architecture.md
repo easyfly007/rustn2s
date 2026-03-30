@@ -360,13 +360,45 @@ See [docs/improve.md](improve.md) for full documentation, scoring system, and be
 
 **Now 6/11 examples score ≥0.9** (up from 3/11 before).
 
-#### Phase 2.2–2.4 — Remaining Placer Issues (TODO)
+#### Phase 2.2 — Cross-Block Symmetry Alignment (DONE)
+
+**Problem:** Matched device pairs (e.g., Q1/Q2 in diff pair, R1/R2 loads) placed in different functional blocks end up at different y-coordinates, causing low symmetry scores.
+
+**Solution:** Added `align_matched_pairs()` to the placer, called after absolute coordinate assignment (step 6). The algorithm:
+
+1. Groups all devices by a matching key: `(symbol_name, W, L, model)` — devices with identical electrical properties are considered matched
+2. For groups of exactly 2 devices in different blocks, aligns their y-coordinates by shifting the smaller block
+3. The shift is applied to all devices in the moved block, preserving internal block layout
+4. Coordinates are snapped to the grid after alignment
+
+**API:** Added `place_with_devices()` method alongside the existing `place()` (which remains as a backwards-compatible wrapper). The `convert()` pipeline now passes device info to the placer.
+
+**Results after Phase 2.2:**
+
+| Example | Before 2.2 | After 2.2 | Delta |
+|---------|-----------|----------|-------|
+| 01 voltage divider | 0.702 | 0.702 | — |
+| 02 RC filter | 0.860 | 0.860 | — |
+| 03 half-wave rectifier | 0.844 | 0.844 | — |
+| 04 NMOS CS amp | 0.818 | 0.818 | — |
+| 05 current mirror | 0.909 | 0.909 | — |
+| 06 BJT diff pair | 0.872 | 0.870 | -0.002 |
+| **07 two-stage opamp** | 0.920 | **0.929** | **+0.009** |
+| 08 bandgap reference | 0.797 | 0.797 | — |
+| 09 inverter chain | 0.916 | 0.916 | — |
+| 10 opamp feedback | 0.946 | 0.946 | — |
+| **11 RLC controlled** | 0.949 | **1.000** | **+0.051** |
+
+**Now 7/11 examples score ≥0.9** (up from 6/11 before Phase 2.2). Example 11 achieves a perfect 1.0 score.
+
+**Note:** The symmetry alignment can introduce overlaps when blocks are shifted (visible in example 06's initial iteration). The `n2s-improve` tuner resolves these by increasing spacing, so the overall score remains stable.
+
+#### Phase 2.3–2.4 — Remaining Placer Issues (TODO)
 
 These issues still require changes to `src/placer/mod.rs`:
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|
-| **Low symmetry score for diff pairs** | Matched devices (e.g., Q1/Q2 in diff pair, R1/R2 loads) are placed at different y-positions when in different blocks | Add cross-block symmetry awareness: when two blocks contain matched devices connected to the same net, align them horizontally at the same y-coordinate |
 | **PMOS/NMOS vertical ordering** | Block ordering within a layer does not consider device polarity | Sort blocks within each layer so PMOS-containing blocks are placed above NMOS-containing blocks |
 | **Sources disconnected from topology** | Voltage/current sources form their own blocks stacked vertically at x=0 | Place source blocks adjacent to the blocks they drive, not in a separate column |
 

@@ -50,9 +50,9 @@ pub fn convert(spice_text: &str, opts: &ConvertOptions) -> Result<Schematic, Str
     let power_nets = analyzer.identify_power_nets(devices);
     let blocks = analyzer.analyze(devices, &opts.cluster);
 
-    // 3. Place
+    // 3. Place (with device info for cross-block symmetry alignment)
     let placer = SchematicPlacer;
-    let placement = placer.place(&blocks, &power_nets, &opts.placer);
+    let placement = placer.place_with_devices(&blocks, &power_nets, &opts.placer, devices);
 
     // 4. Route
     let router = SchematicRouter;

@@ -73,6 +73,13 @@ impl SchematicPlacer {
     pub fn place(
         &self, blocks: &[FunctionalBlock], power_nets: &HashSet<String>, opts: &PlacerOptions,
     ) -> PlacementResult {
+        self.place_with_devices(blocks, power_nets, opts, &[])
+    }
+
+    pub fn place_with_devices(
+        &self, blocks: &[FunctionalBlock], power_nets: &HashSet<String>, opts: &PlacerOptions,
+        devices: &[SpiceDevice],
+    ) -> PlacementResult {
         if blocks.is_empty() {
             return PlacementResult {
                 placements: Vec::new(),
@@ -165,9 +172,123 @@ impl SchematicPlacer {
             }
         }
 
+        // 6. Align matched device pairs (symmetry improvement)
+        if !devices.is_empty() {
+            Self::align_matched_pairs(&mut placements, blocks, devices, opts);
+            // Recompute bounding rect after alignment
+            min_x = f64::MAX; min_y = f64::MAX;
+            max_x = f64::MIN; max_y = f64::MIN;
+            for p in &placements {
+                min_x = min_x.min(p.position.x - 30.0);
+                min_y = min_y.min(p.position.y - 25.0);
+                max_x = max_x.max(p.position.x + 30.0);
+                max_y = max_y.max(p.position.y + 25.0);
+            }
+        }
+
         PlacementResult {
             placements,
             bounding_rect: (Point::new(min_x, min_y), Point::new(max_x, max_y)),
+        }
+    }
+
+    // ========================================================================
+    // Cross-block symmetry alignment
+    // ========================================================================
+
+    /// Post-processing pass: identify matched device pairs across different
+    /// blocks and align their y-coordinates for visual symmetry.
+    ///
+    /// A "matched pair" is two devices with the same symbol type and identical
+    /// key properties (W, L, model) — e.g., the two load resistors in a diff
+    /// pair, or two mirror transistors in separate blocks.
+    fn align_matched_pairs(
+        placements: &mut [DevicePlacement],
+        blocks: &[FunctionalBlock],
+        devices: &[SpiceDevice],
+        opts: &PlacerOptions,
+    ) {
+        // Build device_index → (placement_index, block_index) maps
+        let mut dev_to_placement: HashMap<usize, usize> = HashMap::new();
+        for (pi, p) in placements.iter().enumerate() {
+            dev_to_placement.insert(p.device_index, pi);
+        }
+
+        let mut dev_to_block: HashMap<usize, usize> = HashMap::new();
+        for (bi, block) in blocks.iter().enumerate() {
+            for &di in &block.device_indices {
+                dev_to_block.insert(di, bi);
+            }
+        }
+
+        // Group devices by matching key: (symbol_name, sorted properties)
+        let mut match_groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (di, dev) in devices.iter().enumerate() {
+            let sym_name = Self::symbol_for_device(dev);
+            let mut key_parts = vec![sym_name];
+            let mut props: Vec<(&str, &str)> = dev.parameters.iter()
+                .filter(|(k, _)| matches!(k.as_str(), "W" | "L"))
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            props.push(("model", &dev.model_or_value));
+            props.sort();
+            for (k, v) in props {
+                if !v.is_empty() {
+                    key_parts.push(format!("{}={}", k, v));
+                }
+            }
+            let key = key_parts.join("|");
+            match_groups.entry(key).or_default().push(di);
+        }
+
+        // For groups of exactly 2, align y-coordinates if in different blocks
+        for group in match_groups.values() {
+            if group.len() != 2 { continue; }
+
+            let di_a = group[0];
+            let di_b = group[1];
+
+            let block_a = match dev_to_block.get(&di_a) { Some(&b) => b, None => continue };
+            let block_b = match dev_to_block.get(&di_b) { Some(&b) => b, None => continue };
+
+            // Skip if same block (already handled by block template)
+            if block_a == block_b { continue; }
+
+            let pi_a = match dev_to_placement.get(&di_a) { Some(&p) => p, None => continue };
+            let pi_b = match dev_to_placement.get(&di_b) { Some(&p) => p, None => continue };
+
+            let y_a = placements[pi_a].position.y;
+            let y_b = placements[pi_b].position.y;
+            let y_diff = (y_a - y_b).abs();
+
+            // Only align if they're at meaningfully different y positions
+            if y_diff < opts.grid_size { continue; }
+
+            // Determine which block to move (prefer moving the smaller block)
+            let size_a = blocks[block_a].device_indices.len();
+            let size_b = blocks[block_b].device_indices.len();
+
+            let (move_block, anchor_di, move_di) = if size_a <= size_b {
+                (block_a, di_b, di_a)
+            } else {
+                (block_b, di_a, di_b)
+            };
+
+            let anchor_pi = dev_to_placement[&anchor_di];
+            let move_pi = dev_to_placement[&move_di];
+
+            // Compute the delta to align the moving device with the anchor's y
+            let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
+
+            if dy.abs() < opts.grid_size { continue; }
+
+            // Shift all devices in the moving block by dy
+            for &di in &blocks[move_block].device_indices {
+                if let Some(&pi) = dev_to_placement.get(&di) {
+                    placements[pi].position.y += dy;
+                    placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
+                }
+            }
         }
     }
 
