@@ -34,10 +34,17 @@ n2s is a Rust reimplementation of the N2S pipeline from the MySchematic project.
 n2s/
 ├── Cargo.toml
 ├── docs/
-│   └── architecture.md        ← this file
+│   ├── architecture.md        ← this file
+│   ├── examples.md            ← test circuit documentation
+│   └── improve.md             ← n2s-improve documentation
+├── tests/
+│   └── examples/              ← 11 SPICE test netlists
 └── src/
     ├── lib.rs                 ← Library entry, pipeline orchestration
-    ├── main.rs                ← CLI (clap)
+    ├── main.rs                ← CLI: n2s (netlist → schematic)
+    ├── bin/
+    │   ├── eval.rs            ← CLI: n2s-eval (layout quality metrics)
+    │   └── improve.rs         ← CLI: n2s-improve (iterative optimizer)
     ├── model/
     │   ├── mod.rs             ← Public re-exports
     │   ├── geometry.rs        ← Point, Rect, transform, snap_to_grid
@@ -51,6 +58,18 @@ n2s/
     │   └── mod.rs             ← Sugiyama layout: DAG, layers, crossing min, templates
     ├── router/
     │   └── mod.rs             ← Manhattan routing, power symbols, labels, junctions
+    ├── eval/
+    │   ├── mod.rs             ← Evaluation module entry, EvalReport
+    │   ├── connectivity.rs    ← Net connectivity verification
+    │   ├── overlap.rs         ← Component overlap detection
+    │   ├── wire_crossings.rs  ← Wire segment intersection counting
+    │   ├── wire_length.rs     ← Wire length statistics
+    │   ├── wire_bends.rs      ← Wire bend counting
+    │   ├── bounding_box.rs    ← Bounding box metrics
+    │   ├── label_usage.rs     ← Label usage statistics
+    │   ├── symmetry.rs        ← Matched device pair scoring
+    │   ├── power_convention.rs← PMOS-above-NMOS check
+    │   └── score.rs           ← Quality scoring and tuning advisor
     └── export/
         ├── mod.rs
         ├── svg.rs             ← SVG renderer with dark theme
@@ -314,17 +333,13 @@ Evaluation of 11 test circuits revealed the following quality patterns:
 
 ## TODO: Improvement Roadmap
 
-### Phase 1 — Parameter Auto-Tuning (`n2s-improve` wrapper)
+### Phase 1 — Parameter Auto-Tuning (`n2s-improve`) ✓ COMPLETED
 
-An automated feedback loop: `n2s → n2s-eval → adjust parameters → re-run n2s`.
+Implemented as `src/bin/improve.rs` with scoring in `src/eval/score.rs`. The binary runs an automated feedback loop: `n2s → n2s-eval → score → adjust params → re-run n2s`.
 
-These eval metrics can drive parameter adjustments with the current codebase:
+See [docs/improve.md](improve.md) for full documentation, scoring system, and benchmark results.
 
-| Eval Metric | Parameter to Adjust | Strategy |
-|-------------|---------------------|----------|
-| High aspect ratio (>4:1) | `--layer-spacing` ↑, `--device-spacing` ↓ | Spread components horizontally, compress vertically |
-| Too many labels | `--label-threshold` ↑ | Increase threshold → more direct wires |
-| Component overlap | `--block-spacing` ↑, `--device-spacing` ↑ | Increase spacing until overlaps resolve |
+**Summary**: Parameter tuning effectively improves medium-complexity circuits (scores ≥0.9 for op-amps and hierarchical designs). However, simple linear circuits and symmetry issues cannot be resolved by parameter tuning alone — they require the algorithmic changes in Phases 2–3.
 
 ### Phase 2 — Placer Algorithm Improvements
 

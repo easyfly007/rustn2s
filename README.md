@@ -171,6 +171,53 @@ Output is structured JSON for consumption by downstream tools or agents.
 
 See [docs/examples.md](docs/examples.md) for test circuits and run commands.
 
+## Iterative Layout Optimization
+
+The `n2s-improve` binary automates the feedback loop: generate schematic → evaluate quality → adjust parameters → regenerate. It maximizes a weighted quality score (0.0–1.0) combining overlap, wire crossings, aspect ratio, wire length, label usage, symmetry, and power convention metrics.
+
+### Build
+
+```bash
+cargo build --release
+# Binary at target/release/n2s-improve
+```
+
+### Usage
+
+```bash
+# Optimize and output best SVG
+n2s-improve circuit.sp -o circuit.svg
+
+# With JSON output and detailed report
+n2s-improve circuit.sp -o circuit.svg --json circuit.json --pretty
+
+# Custom targets
+n2s-improve circuit.sp -o circuit.svg --target-score 0.95 --max-iter 20
+
+# Extract optimized parameters for use with n2s directly
+n2s-improve circuit.sp --quiet | jq '.best_params'
+```
+
+### Options
+
+```
+n2s-improve <INPUT> [OPTIONS]
+
+Options:
+  -o, --output <FILE>        Output SVG file (best result)
+      --json <FILE>          Output JSON schematic file (best result)
+      --max-iter <N>         Maximum iterations [default: 10]
+      --target-score <F>     Target quality score [default: 0.9]
+      --layer-spacing <F>    Initial layer spacing [default: 200]
+      --block-spacing <F>    Initial block spacing [default: 100]
+      --device-spacing <F>   Initial device spacing [default: 80]
+      --label-threshold <F>  Initial label threshold [default: 300]
+      --pretty               Pretty-print the JSON report
+      --quiet                Suppress iteration logs
+```
+
+See [docs/improve.md](docs/improve.md) for detailed scoring system, tuning rules, and benchmark results.
+
 ## License
 
 MIT

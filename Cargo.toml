@@ -20,3 +20,7 @@ path = "src/main.rs"
 [[bin]]
 name = "n2s-eval"
 path = "src/bin/eval.rs"
+
+[[bin]]
+name = "n2s-improve"
+path = "src/bin/improve.rs"

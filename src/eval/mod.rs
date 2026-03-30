@@ -7,6 +7,7 @@ mod bounding_box;
 mod label_usage;
 mod symmetry;
 mod power_convention;
+pub mod score;
 
 use serde::Serialize;
 use crate::model::Schematic;
