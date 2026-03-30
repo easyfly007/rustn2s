@@ -101,36 +101,67 @@ impl SchematicPlacer {
             .collect();
 
         // 5. Absolute coordinates
+        //    When a layer has many blocks, arrange them in a grid to avoid
+        //    extreme vertical aspect ratios. The target is roughly square.
         let mut placements = Vec::new();
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
         let mut max_x = f64::MIN;
         let mut max_y = f64::MIN;
 
+        // Compute column widths for multi-column layers so subsequent layers
+        // are offset correctly.
+        let mut layer_x_start: Vec<f64> = Vec::new();
+        let mut x_cursor = 0.0;
+        for layer in &layers {
+            layer_x_start.push(x_cursor);
+            let cols = Self::compute_grid_columns(layer, &block_layouts, opts);
+            // Advance x_cursor by the total width of this layer's grid
+            let mut max_col_width = 0.0f64;
+            for col_blocks in &cols {
+                let col_w = col_blocks.iter()
+                    .map(|&&bi| block_layouts[bi].width)
+                    .fold(0.0f64, f64::max);
+                max_col_width += col_w + opts.layer_spacing;
+            }
+            // Use at least one layer_spacing worth of width
+            x_cursor += max_col_width.max(opts.layer_spacing);
+        }
+
         for (l, layer) in layers.iter().enumerate() {
-            let x = l as f64 * opts.layer_spacing;
-            let mut y_cursor = 0.0;
+            let base_x = layer_x_start[l];
+            let cols = Self::compute_grid_columns(layer, &block_layouts, opts);
 
-            for &block_idx in layer {
-                let layout = &block_layouts[block_idx];
-                let anchor = Point::new(x, y_cursor);
+            let mut col_x = base_x;
+            for col_blocks in &cols {
+                let mut y_cursor = 0.0;
+                let col_width = col_blocks.iter()
+                    .map(|&&bi| block_layouts[bi].width)
+                    .fold(0.0f64, f64::max);
 
-                for &(dev_idx, ref sym, offset, rot, mir) in &layout.placements {
-                    let pos = (anchor + offset).snap_to_grid(opts.grid_size);
-                    placements.push(DevicePlacement {
-                        device_index: dev_idx,
-                        symbol_name: sym.clone(),
-                        position: pos,
-                        rotation: rot,
-                        mirrored: mir,
-                    });
-                    min_x = min_x.min(pos.x - 30.0);
-                    min_y = min_y.min(pos.y - 25.0);
-                    max_x = max_x.max(pos.x + 30.0);
-                    max_y = max_y.max(pos.y + 25.0);
+                for &&block_idx in col_blocks {
+                    let layout = &block_layouts[block_idx];
+                    let anchor = Point::new(col_x, y_cursor);
+
+                    for &(dev_idx, ref sym, offset, rot, mir) in &layout.placements {
+                        let pos = (anchor + offset).snap_to_grid(opts.grid_size);
+                        placements.push(DevicePlacement {
+                            device_index: dev_idx,
+                            symbol_name: sym.clone(),
+                            position: pos,
+                            rotation: rot,
+                            mirrored: mir,
+                        });
+                        min_x = min_x.min(pos.x - 30.0);
+                        min_y = min_y.min(pos.y - 25.0);
+                        max_x = max_x.max(pos.x + 30.0);
+                        max_y = max_y.max(pos.y + 25.0);
+                    }
+
+                    y_cursor += layout.height + opts.inter_block_spacing;
                 }
 
-                y_cursor += layout.height + opts.inter_block_spacing;
+                col_x += col_width + opts.layer_spacing;
             }
         }
 
@@ -138,6 +169,65 @@ impl SchematicPlacer {
             placements,
             bounding_rect: (Point::new(min_x, min_y), Point::new(max_x, max_y)),
         }
+    }
+
+    // ========================================================================
+    // Multi-column grid layout for large layers
+    // ========================================================================
+
+    /// When a layer has many blocks, split them into multiple columns to
+    /// achieve a roughly square aspect ratio instead of an extreme vertical strip.
+    ///
+    /// Returns a vector of columns, each column being a slice of block indices.
+    fn compute_grid_columns<'a>(
+        layer: &'a [usize],
+        block_layouts: &[InternalLayout],
+        opts: &PlacerOptions,
+    ) -> Vec<Vec<&'a usize>> {
+        if layer.len() <= 2 {
+            // 1-2 blocks: single column is fine
+            return vec![layer.iter().collect()];
+        }
+
+        // Compute total height if all blocks were in one column
+        let total_height: f64 = layer.iter()
+            .map(|&bi| block_layouts[bi].height + opts.inter_block_spacing)
+            .sum();
+
+        // Compute max block width (gives us the column width)
+        let max_block_width: f64 = layer.iter()
+            .map(|&bi| block_layouts[bi].width)
+            .fold(60.0f64, f64::max);
+
+        // Target: aspect ratio close to 1.5 (slightly wider than tall).
+        // num_cols = ceil(sqrt(total_height / (target_ratio * col_width)))
+        let target_ratio = 1.5;
+        let ideal_cols = (total_height / (target_ratio * (max_block_width + opts.layer_spacing))).sqrt();
+        let num_cols = (ideal_cols.ceil() as usize).max(1).min(layer.len());
+
+        if num_cols <= 1 {
+            return vec![layer.iter().collect()];
+        }
+
+        // Distribute blocks across columns, balancing total height per column.
+        // Greedy: assign each block to the column with the smallest current height.
+        let mut columns: Vec<Vec<&usize>> = (0..num_cols).map(|_| Vec::new()).collect();
+        let mut col_heights: Vec<f64> = vec![0.0; num_cols];
+
+        for bi in layer {
+            // Find the column with minimum height
+            let min_col = col_heights.iter()
+                .enumerate()
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            columns[min_col].push(bi);
+            col_heights[min_col] += block_layouts[*bi].height + opts.inter_block_spacing;
+        }
+
+        // Remove empty columns
+        columns.retain(|c| !c.is_empty());
+        columns
     }
 
     // ========================================================================

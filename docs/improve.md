@@ -225,42 +225,41 @@ All parameters are clamped to prevent runaway:
 
 ## Results on Test Examples
 
-Results from running `n2s-improve` on all 11 test circuits:
+Results from running `n2s-improve` on all 11 test circuits (after Phase 2.1 multi-column fix):
 
 | Example | Initial | Best | Delta | Iters | Converged | Limiting Factor |
 |---------|---------|------|-------|-------|-----------|-----------------|
-| 01 voltage divider | 0.694 | 0.702 | +0.008 | 5 | Yes (stalled) | Aspect ratio (vertical chain) |
-| 02 RC filter | 0.844 | 0.860 | +0.016 | 5 | Yes (stalled) | Aspect ratio |
-| 03 half-wave rectifier | 0.838 | 0.844 | +0.006 | 5 | Yes (stalled) | Aspect ratio |
-| 04 NMOS CS amp | 0.784 | 0.784 | +0.000 | 1 | Yes (no advice) | Symmetry (false match on caps) |
-| 05 current mirror | 0.854 | 0.854 | +0.000 | 2 | Yes (no advice) | Symmetry (R1/R2 in diff layers) |
-| 06 BJT diff pair | 0.677 | 0.680 | +0.003 | 10 | No (max iter) | Aspect ratio + symmetry |
-| **07 two-stage opamp** | **0.901** | **0.901** | **+0.000** | **1** | **Yes (target)** | — |
-| 08 bandgap reference | 0.677 | 0.677 | +0.000 | 2 | Yes (no advice) | Symmetry + crossings |
+| 01 voltage divider | 0.694 | 0.702 | +0.008 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
+| 02 RC filter | 0.844 | 0.860 | +0.016 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
+| 03 half-wave rectifier | 0.838 | 0.844 | +0.006 | 5 | Yes (stalled) | Aspect ratio (only 4 devices) |
+| 04 NMOS CS amp | 0.818 | 0.818 | +0.000 | 1 | Yes (no advice) | Symmetry |
+| **05 current mirror** | **0.909** | **0.909** | **+0.000** | **1** | **Yes (target)** | — |
+| 06 BJT diff pair | 0.872 | 0.872 | +0.000 | 1 | Yes (no advice) | Symmetry |
+| **07 two-stage opamp** | **0.920** | **0.920** | **+0.000** | **1** | **Yes (target)** | — |
+| 08 bandgap reference | 0.797 | 0.797 | +0.000 | 3 | Yes (no advice) | Symmetry + crossings |
 | **09 inverter chain** | **0.916** | **0.916** | **+0.000** | **1** | **Yes (target)** | — |
-| **10 opamp feedback** | **0.920** | **0.920** | **+0.000** | **1** | **Yes (target)** | — |
-| 11 RLC controlled | 0.658 | 0.664 | +0.006 | 5 | Yes (stalled) | Aspect ratio (15 devices, 1 column) |
+| **10 opamp feedback** | **0.946** | **0.946** | **+0.000** | **1** | **Yes (target)** | — |
+| **11 RLC controlled** | **0.949** | **0.949** | **+0.000** | **1** | **Yes (target)** | — |
+
+**6/11 examples now score ≥0.9 with default parameters** (up from 3/11 before Phase 2.1).
 
 ### Key Observations
 
-1. **Parameter tuning works well for medium-complexity circuits** (examples 07, 09, 10 score ≥0.9 with defaults).
+1. **The multi-column grid layout (Phase 2.1) was the single biggest improvement.** Examples 06 and 11 jumped from 0.68 to 0.87/0.95 purely from better block arrangement.
 
-2. **Simple linear circuits** (01, 02, 03) have inherently high aspect ratios because all components fall in a single DAG layer. Parameter tuning helps slightly but can't fix the fundamental single-column layout. **Requires Phase 2: placer multi-column splitting.**
+2. **Simple linear circuits** (01, 02, 03) still have high aspect ratios because they have only 3-4 devices — too few to trigger multi-column splitting (threshold is 3+ blocks). This is acceptable since very small circuits naturally form vertical chains.
 
-3. **Symmetry is the biggest unresolved issue.** Matched pairs (Q1/Q2, R1/R2) in different functional blocks are placed at different y-positions. Parameter tuning cannot address this. **Requires Phase 2: cross-block symmetry awareness.**
+3. **Symmetry is now the primary remaining issue.** Matched pairs (Q1/Q2, R1/R2) in different functional blocks are placed in different grid cells. **Requires Phase 2.2: cross-block symmetry awareness.**
 
-4. **The tuner correctly avoids oscillation** via the stall detector (3 iterations of <0.001 change) and best-score tracking. Even when later iterations score worse (e.g., overlap from tight spacing), the best result is preserved.
-
-5. **The overlap↔spacing tension is real**: reducing device_spacing to fix aspect ratio can create overlaps, which then increases block_spacing, worsening aspect ratio. The tuner handles this by selecting the best overall score rather than the last.
+4. **The tuner converges quickly.** Most examples now hit target score or find no tuning advice at iteration 0, meaning the defaults are already good after the algorithmic fix.
 
 ## Limitations
 
-These quality issues **cannot** be fixed by parameter tuning and require algorithmic changes (Phases 2–3):
+These quality issues **cannot** be fixed by parameter tuning and require algorithmic changes (Phases 2.2–3):
 
 | Issue | Why Parameters Can't Help | Required Fix |
 |-------|---------------------------|--------------|
-| All blocks in one column | DAG has no edges between blocks → single layer | Placer: multi-column layout for wide layers |
-| Matched devices at different y | Devices in separate blocks, blocks stacked vertically | Placer: cross-block symmetry alignment |
+| Matched devices at different y | Devices in separate blocks, placed in different grid cells | Placer: cross-block symmetry alignment |
 | Duplicate labels per net | Router emits 2 labels per pin pair, not per net | Router: label deduplication |
 | Wire crossings | Fixed horizontal-first L-routing | Router: try both L-route orientations |
 | Sources separated from circuit | Source blocks have no DAG edges to signal blocks | Placer: source proximity heuristic |

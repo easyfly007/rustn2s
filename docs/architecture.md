@@ -343,14 +343,32 @@ See [docs/improve.md](improve.md) for full documentation, scoring system, and be
 
 ### Phase 2 — Placer Algorithm Improvements
 
-These issues require changes to `src/placer/mod.rs`:
+#### Phase 2.1 — Multi-Column Grid Layout ✓ COMPLETED
+
+**Problem**: When many blocks land in the same DAG layer (common for circuits with few inter-block dependencies), they were stacked in a single vertical column, creating extreme aspect ratios (up to 42:1).
+
+**Solution**: Added `compute_grid_columns()` to `src/placer/mod.rs`. When a layer has 3+ blocks, it computes the optimal number of columns to achieve a target aspect ratio of ~1.5, then distributes blocks across columns using a greedy height-balancing algorithm.
+
+**Results**:
+
+| Example | Before AR | After AR | Score Before | Score After |
+|---------|-----------|----------|-------------|-------------|
+| 06 BJT diff pair | 22.86 | 1.79 | 0.677 | 0.872 |
+| 11 RLC controlled | 42.0 | 1.05 | 0.658 | 0.949 |
+| 04 NMOS CS amp | 3.19 | 1.18 | 0.784 | 0.818 |
+| 10 opamp feedback | 1.14 | 1.81 | 0.920 | 0.946 |
+
+**Now 6/11 examples score ≥0.9** (up from 3/11 before).
+
+#### Phase 2.2–2.4 — Remaining Placer Issues (TODO)
+
+These issues still require changes to `src/placer/mod.rs`:
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|
 | **Low symmetry score for diff pairs** | Matched devices (e.g., Q1/Q2 in diff pair, R1/R2 loads) are placed at different y-positions when in different blocks | Add cross-block symmetry awareness: when two blocks contain matched devices connected to the same net, align them horizontally at the same y-coordinate |
 | **PMOS/NMOS vertical ordering** | Block ordering within a layer does not consider device polarity | Sort blocks within each layer so PMOS-containing blocks are placed above NMOS-containing blocks |
 | **Sources disconnected from topology** | Voltage/current sources form their own blocks stacked vertically at x=0 | Place source blocks adjacent to the blocks they drive, not in a separate column |
-| **Extreme aspect ratios** | All blocks in a layer are stacked vertically with no horizontal spreading | When a single layer has many blocks, split into multiple columns or use a grid layout within the layer |
 
 ### Phase 3 — Router Algorithm Improvements
 
