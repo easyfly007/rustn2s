@@ -16,3 +16,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "n2s"
 path = "src/main.rs"
+
+[[bin]]
+name = "n2s-eval"
+path = "src/bin/eval.rs"

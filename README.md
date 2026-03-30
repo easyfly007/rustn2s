@@ -102,6 +102,41 @@ SPICE file
 
 See [docs/architecture.md](docs/architecture.md) for detailed design documentation.
 
+## Evaluating Schematic Quality
+
+The `n2s-eval` binary evaluates layout quality of generated schematics by comparing the original netlist against the JSON output.
+
+### Build
+
+```bash
+cargo build --release
+# Binary at target/release/n2s-eval
+```
+
+### Usage
+
+```bash
+n2s-eval -n circuit.sp -s schematic.json --pretty
+```
+
+### Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `connectivity` | Net count match, missing connections, orphan labels |
+| `component_overlap` | Pairwise bounding box overlap detection |
+| `wire_crossings` | Wire segment intersection count |
+| `wire_length` | Total, average, min, max wire length |
+| `wire_bends` | Bend count per wire and overall |
+| `bounding_box` | Width, height, area, aspect ratio |
+| `label_usage` | Label pairs vs direct wires ratio |
+| `symmetry` | Matched device pair placement score (0–1) |
+| `power_convention` | PMOS-above-NMOS placement score (0–1) |
+
+Output is structured JSON for consumption by downstream tools or agents.
+
+See [docs/examples.md](docs/examples.md) for test circuits and run commands.
+
 ## License
 
 MIT

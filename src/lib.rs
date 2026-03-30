@@ -4,6 +4,7 @@ pub mod analyzer;
 pub mod placer;
 pub mod router;
 pub mod export;
+pub mod eval;
 
 use model::Schematic;
 use parser::ParseResult;
