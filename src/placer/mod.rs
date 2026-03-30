@@ -102,6 +102,11 @@ impl SchematicPlacer {
         // 3. Crossing minimization
         Self::minimize_crossings(&mut layers, &graph, 4);
 
+        // 3.5. Sort blocks within each layer: PMOS-containing above NMOS-containing
+        if !devices.is_empty() {
+            Self::sort_blocks_by_polarity(&mut layers, blocks, devices);
+        }
+
         // 4. Block-internal layouts
         let block_layouts: Vec<InternalLayout> = blocks.iter()
             .map(|b| Self::layout_block(b, opts))
@@ -289,6 +294,56 @@ impl SchematicPlacer {
                     placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
                 }
             }
+        }
+    }
+
+    // ========================================================================
+    // PMOS-above-NMOS block ordering
+    // ========================================================================
+
+    /// Sort blocks within each layer so that PMOS-containing blocks appear
+    /// above (earlier in the list = lower y = higher on screen) NMOS-containing
+    /// blocks. This enforces the standard schematic convention where power
+    /// rails are at the top and ground rails are at the bottom.
+    ///
+    /// Polarity classification:
+    /// - PMOS block: contains at least one PMOS device and no NMOS devices
+    /// - NMOS block: contains at least one NMOS device and no PMOS devices
+    /// - Mixed/neutral: contains both or neither — keeps original position
+    ///
+    /// Within the same polarity group, the original crossing-minimized order
+    /// is preserved (stable sort).
+    fn sort_blocks_by_polarity(
+        layers: &mut [Vec<usize>],
+        blocks: &[FunctionalBlock],
+        devices: &[SpiceDevice],
+    ) {
+        // Classify each block's polarity
+        // 0 = PMOS (top), 1 = mixed/neutral (middle), 2 = NMOS (bottom)
+        let classify_block = |block: &FunctionalBlock| -> u8 {
+            let mut has_pmos = false;
+            let mut has_nmos = false;
+            for &di in &block.device_indices {
+                if di < devices.len() {
+                    let sym = Self::symbol_for_device(&devices[di]);
+                    match sym.as_str() {
+                        "pmos4" | "pnp" => has_pmos = true,
+                        "nmos4" | "npn" => has_nmos = true,
+                        _ => {}
+                    }
+                }
+            }
+            match (has_pmos, has_nmos) {
+                (true, false) => 0,  // PMOS → top
+                (false, true) => 2,  // NMOS → bottom
+                _ => 1,              // mixed or passive → middle
+            }
+        };
+
+        for layer in layers.iter_mut() {
+            if layer.len() <= 1 { continue; }
+            // Stable sort preserves crossing-minimized order within same polarity
+            layer.sort_by_key(|&bi| classify_block(&blocks[bi]));
         }
     }
 

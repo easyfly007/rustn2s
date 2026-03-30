@@ -393,13 +393,28 @@ See [docs/improve.md](improve.md) for full documentation, scoring system, and be
 
 **Note:** The symmetry alignment can introduce overlaps when blocks are shifted (visible in example 06's initial iteration). The `n2s-improve` tuner resolves these by increasing spacing, so the overall score remains stable.
 
-#### Phase 2.3–2.4 — Remaining Placer Issues (TODO)
+#### Phase 2.3 — PMOS-Above-NMOS Block Ordering (DONE)
 
-These issues still require changes to `src/placer/mod.rs`:
+**Problem:** Block ordering within a layer does not consider device polarity, so NMOS blocks can appear above PMOS blocks, violating the standard schematic convention.
+
+**Solution:** Added `sort_blocks_by_polarity()` to the placer, called after crossing minimization (step 3.5). The algorithm:
+
+1. Classifies each block by polarity: PMOS-only (pmos4/pnp) → top, NMOS-only (nmos4/npn) → bottom, mixed/passive → middle
+2. Stable-sorts blocks within each layer by polarity, preserving the crossing-minimized order within the same group
+
+**Results after Phase 2.3:**
+
+| Example | Before 2.3 | After 2.3 | Delta |
+|---------|-----------|----------|-------|
+| 04 NMOS CS amp | 0.818 | **0.821** | **+0.003** |
+| All others | unchanged | unchanged | — |
+
+Power convention was already at 1.0 for all examples. The polarity sort primarily improves layout aesthetics and slightly improves aspect ratio for mixed-polarity circuits.
+
+#### Phase 2.4 — Remaining Placer Issues (TODO)
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|
-| **PMOS/NMOS vertical ordering** | Block ordering within a layer does not consider device polarity | Sort blocks within each layer so PMOS-containing blocks are placed above NMOS-containing blocks |
 | **Sources disconnected from topology** | Voltage/current sources form their own blocks stacked vertically at x=0 | Place source blocks adjacent to the blocks they drive, not in a separate column |
 
 ### Phase 3 — Router Algorithm Improvements

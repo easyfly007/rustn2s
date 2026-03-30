@@ -225,14 +225,14 @@ All parameters are clamped to prevent runaway:
 
 ## Results on Test Examples
 
-Results from running `n2s-improve` on all 11 test circuits (after Phase 2.2 cross-block symmetry alignment):
+Results from running `n2s-improve` on all 11 test circuits (after Phase 2.3 PMOS-above-NMOS ordering):
 
 | Example | Initial | Best | Delta | Iters | Converged | Limiting Factor |
 |---------|---------|------|-------|-------|-----------|-----------------|
 | 01 voltage divider | 0.694 | 0.702 | +0.008 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
 | 02 RC filter | 0.844 | 0.860 | +0.016 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
 | 03 half-wave rectifier | 0.838 | 0.844 | +0.006 | 5 | Yes (stalled) | Aspect ratio (only 4 devices) |
-| 04 NMOS CS amp | 0.818 | 0.818 | +0.000 | 1 | Yes (no advice) | Symmetry |
+| 04 NMOS CS amp | 0.821 | 0.821 | +0.000 | 1 | Yes (no advice) | Symmetry |
 | **05 current mirror** | **0.909** | **0.909** | **+0.000** | **1** | **Yes (target)** | — |
 | 06 BJT diff pair | 0.699 | 0.870 | +0.171 | 4 | Yes (no advice) | Symmetry (0.33) |
 | **07 two-stage opamp** | **0.929** | **0.929** | **+0.000** | **1** | **Yes (target)** | — |
