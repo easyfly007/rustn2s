@@ -1,0 +1,5 @@
+* Half-Wave Rectifier
+V1 in 0 SIN(0,5,1k)
+D1 in out DMOD
+R1 out 0 1k
+C1 out 0 10u
