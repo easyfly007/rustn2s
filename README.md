@@ -116,7 +116,41 @@ cargo build --release
 ### Usage
 
 ```bash
+# Single circuit, pretty-printed
 n2s-eval -n circuit.sp -s schematic.json --pretty
+
+# Compact JSON (for piping to another tool)
+n2s-eval -n circuit.sp -s schematic.json | jq '.symmetry.overall_score'
+```
+
+### Full Pipeline (generate + evaluate)
+
+```bash
+n2s circuit.sp -o circuit.svg -o circuit.json
+n2s-eval -n circuit.sp -s circuit.json --pretty
+```
+
+### Batch Evaluate All Examples
+
+```bash
+mkdir -p output
+for f in tests/examples/*.sp; do
+  name=$(basename "$f" .sp)
+  n2s "$f" -o "output/${name}.json"
+  echo "=== $name ==="
+  n2s-eval -n "$f" -s "output/${name}.json" --pretty
+done
+```
+
+### Options
+
+```
+n2s-eval --netlist <SPICE_FILE> --schematic <JSON_FILE> [--pretty]
+
+Options:
+  -n, --netlist <PATH>      Path to the original SPICE netlist
+  -s, --schematic <PATH>    Path to the generated JSON schematic
+  --pretty                   Pretty-print the JSON output
 ```
 
 ### Metrics
