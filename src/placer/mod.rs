@@ -90,8 +90,9 @@ impl SchematicPlacer {
         // 1. Build DAG
         let graph = Self::build_dag(blocks, power_nets);
 
-        // 2. Assign layers
-        let layer_assignment = Self::assign_layers(&graph);
+        // 2. Assign layers (with source proximity fix)
+        let mut layer_assignment = Self::assign_layers(&graph);
+        Self::fix_isolated_source_layers(&mut layer_assignment, blocks, &graph);
 
         let max_layer = *layer_assignment.iter().max().unwrap_or(&0);
         let mut layers: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
@@ -443,6 +444,7 @@ impl SchematicPlacer {
             }
         }
 
+
         // Cycle removal via DFS
         #[derive(Clone, Copy, PartialEq)]
         enum Color { White, Gray, Black }
@@ -524,6 +526,45 @@ impl SchematicPlacer {
         }
 
         layers
+    }
+
+    /// Move isolated blocks (no DAG edges) to the same layer as the
+    /// non-isolated block they share the most nets with. This prevents
+    /// V/I sources from piling up at layer 0 when their terminals are
+    /// all classified as power nets.
+    fn fix_isolated_source_layers(
+        layers: &mut [usize],
+        blocks: &[FunctionalBlock],
+        graph: &BlockGraph,
+    ) {
+        let n = graph.node_count;
+        let mut has_edges = vec![false; n];
+        for &(from, to) in &graph.edges {
+            has_edges[from] = true;
+            has_edges[to] = true;
+        }
+
+        for i in 0..n {
+            if has_edges[i] { continue; }
+
+            // Find non-isolated block sharing the most nets
+            let mut best_target: Option<usize> = None;
+            let mut best_shared = 0usize;
+
+            for j in 0..n {
+                if i == j || !has_edges[j] { continue; }
+                let shared = blocks[i].all_nets.intersection(&blocks[j].all_nets).count();
+                if shared > best_shared {
+                    best_shared = shared;
+                    best_target = Some(j);
+                }
+            }
+
+            if let Some(j) = best_target {
+                // Place in same layer as target block
+                layers[i] = layers[j];
+            }
+        }
     }
 
     // ========================================================================

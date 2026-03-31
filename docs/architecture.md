@@ -411,11 +411,27 @@ See [docs/improve.md](improve.md) for full documentation, scoring system, and be
 
 Power convention was already at 1.0 for all examples. The polarity sort primarily improves layout aesthetics and slightly improves aspect ratio for mixed-polarity circuits.
 
-#### Phase 2.4 — Remaining Placer Issues (TODO)
+#### Phase 2.4 — Source Proximity (DONE)
 
-| Issue | Root Cause | Fix |
-|-------|-----------|-----|
-| **Sources disconnected from topology** | Voltage/current sources form their own blocks stacked vertically at x=0 | Place source blocks adjacent to the blocks they drive, not in a separate column |
+**Problem:** Voltage/current sources form isolated blocks in the DAG because `identify_power_nets()` marks all V source terminals as power nets, causing empty input/output nets and no DAG connections. Sources pile up at layer 0.
+
+**Solution:** Two changes:
+
+1. **Analyzer** (`src/analyzer/mod.rs`): V/I sources now always include their positive terminal (node[0]) as an output net, giving them connectivity information in their `all_nets` set.
+
+2. **Placer** (`src/placer/mod.rs`): Added `fix_isolated_source_layers()` after layer assignment. For blocks with no DAG edges, finds the non-isolated block sharing the most nets (via `all_nets` intersection) and assigns the isolated block to the same layer. This places sources alongside the circuit blocks they drive instead of in a separate column.
+
+**Results after Phase 2.4:**
+
+| Example | Before 2.4 | After 2.4 | Delta |
+|---------|:---:|:---:|:---:|
+| **05 current mirror** | 0.930 | **0.966** | **+0.036** |
+| **09 inverter chain** | 0.916 | **0.991** | **+0.075** |
+| 07 two-stage opamp | 0.958 | 0.956 | -0.002 |
+| 10 opamp feedback | 0.950 | 0.936 | -0.014 |
+| All others | unchanged | unchanged | — |
+
+**Now 9/11 examples score ≥0.9** (up from 8/11 before Phase 2.4).
 
 ### Phase 3 — Router Algorithm Improvements (DONE)
 

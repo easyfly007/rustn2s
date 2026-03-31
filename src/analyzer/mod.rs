@@ -438,6 +438,20 @@ impl CircuitAnalyzer {
                 block.input_nets = vec![dev.nodes[2].clone(), dev.nodes[3].clone()];
                 block.output_nets = vec![dev.nodes[0].clone(), dev.nodes[1].clone()];
             }
+            // Voltage/current sources: always include the positive terminal
+            // (node[0]) as an output so the source block connects in the DAG
+            // to the blocks it drives, even when the terminal is a power net.
+            'V' | 'I' if dev.nodes.len() >= 2 => {
+                // Positive terminal is always an output (the supply it provides)
+                block.output_nets.push(dev.nodes[0].clone());
+                // Negative terminal is an input only if it's not a standard ground
+                let node1_lower = dev.nodes[1].to_lowercase();
+                let is_ground = matches!(node1_lower.as_str(),
+                    "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss");
+                if !is_ground {
+                    block.input_nets.push(dev.nodes[1].clone());
+                }
+            }
             _ if dev.nodes.len() >= 2 => {
                 if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
                     block.input_nets.push(dev.nodes[0].clone());

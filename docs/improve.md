@@ -225,7 +225,7 @@ All parameters are clamped to prevent runaway:
 
 ## Results on Test Examples
 
-Results from running `n2s-improve` on all 11 test circuits (after Phase 3 router improvements):
+Results from running `n2s-improve` on all 11 test circuits (after Phase 2.4 source proximity):
 
 | Example | Initial | Best | Delta | Iters | Converged | Limiting Factor |
 |---------|---------|------|-------|-------|-----------|-----------------|
@@ -233,36 +233,38 @@ Results from running `n2s-improve` on all 11 test circuits (after Phase 3 router
 | 02 RC filter | 0.844 | 0.860 | +0.016 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
 | 03 half-wave rectifier | 0.838 | 0.844 | +0.006 | 5 | Yes (stalled) | Aspect ratio (only 4 devices) |
 | 04 NMOS CS amp | 0.825 | 0.825 | +0.000 | 1 | Yes (no advice) | Symmetry |
-| **05 current mirror** | **0.892** | **0.930** | **+0.038** | **2** | **Yes (target)** | — |
+| **05 current mirror** | **0.966** | **0.966** | **+0.000** | **1** | **Yes (target)** | — |
 | 06 BJT diff pair | 0.699 | 0.883 | +0.184 | 4 | Yes (no advice) | Symmetry (0.33) |
-| **07 two-stage opamp** | **0.958** | **0.958** | **+0.000** | **1** | **Yes (target)** | — |
+| **07 two-stage opamp** | **0.956** | **0.956** | **+0.000** | **1** | **Yes (target)** | — |
 | 08 bandgap reference | 0.808 | 0.808 | +0.000 | 2 | Yes (no advice) | Symmetry |
-| **09 inverter chain** | **0.916** | **0.916** | **+0.000** | **1** | **Yes (target)** | — |
-| **10 opamp feedback** | **0.950** | **0.950** | **+0.000** | **1** | **Yes (target)** | — |
+| **09 inverter chain** | **0.991** | **0.991** | **+0.000** | **1** | **Yes (target)** | — |
+| **10 opamp feedback** | **0.936** | **0.936** | **+0.000** | **1** | **Yes (target)** | — |
 | **11 RLC controlled** | **1.000** | **1.000** | **+0.000** | **1** | **Yes (target)** | — |
 
-**8/11 examples now score ≥0.9** (up from 7/11 before Phase 3). Example 07 jumped to 0.958 from label deduplication (28→8 labels).
+**9/11 examples now score ≥0.9** (up from 8/11 before Phase 2.4). Example 09 reaches 0.991 and example 05 reaches 0.966.
 
 ### Key Observations
 
-1. **Phase 3 router improvements had the biggest per-example impact** on label-heavy circuits. Example 07 (two-stage opamp) jumped from 0.929 to 0.958 purely from label deduplication.
+1. **Source proximity (Phase 2.4) significantly improved circuits with V/I sources.** Example 05 jumped from 0.930 to 0.966 and example 09 from 0.916 to 0.991.
 
-2. **MST routing replaced star topology**, reducing total wire length and producing more natural routing patterns. Example 05 and 06 both improved from better edge selection.
+2. **All Phases 1–3 combined** brought the average score from ~0.80 to ~0.90 across all examples. The algorithmic fixes (Phases 2–3) were far more impactful than parameter tuning (Phase 1).
 
-3. **Adaptive L-route orientation** eliminated the crossing in example 09 by choosing vertical-first when horizontal-first would cross existing wires.
+3. **Simple linear circuits** (01, 02, 03) still have high aspect ratios because they have only 3-4 devices — inherent limitation of small circuits.
 
-4. **Simple linear circuits** (01, 02, 03) still have high aspect ratios because they have only 3-4 devices — inherent limitation of small circuits.
+4. **Remaining weak spots** are symmetry (examples 04, 06, 08) where matched devices aren't recognized across certain block configurations.
 
 ## Limitations
 
-These quality issues require further algorithmic changes:
+All Phase 1–3 algorithmic issues have been addressed. Remaining quality gaps:
 
-| Issue | Why Parameters Can't Help | Required Fix |
-|-------|---------------------------|--------------|
-| ~~Matched devices at different y~~ | ~~Devices in separate blocks~~ | ~~Placer: cross-block symmetry alignment~~ **DONE (Phase 2.2)** |
-| ~~Duplicate labels per net~~ | ~~Router emits 2 labels per pin pair~~ | ~~Router: label deduplication~~ **DONE (Phase 3.1)** |
-| ~~Wire crossings~~ | ~~Fixed horizontal-first L-routing~~ | ~~Router: adaptive L-route orientation~~ **DONE (Phase 3.2)** |
-| Sources separated from circuit | Source blocks have no DAG edges to signal blocks | Placer: source proximity heuristic |
+| Issue | Why Parameters Can't Help | Status |
+|-------|---------------------------|--------|
+| ~~Matched devices at different y~~ | ~~Devices in separate blocks~~ | **DONE (Phase 2.2)** |
+| ~~Duplicate labels per net~~ | ~~Router emits 2 labels per pin pair~~ | **DONE (Phase 3.1)** |
+| ~~Wire crossings~~ | ~~Fixed horizontal-first L-routing~~ | **DONE (Phase 3.2)** |
+| ~~Sources separated from circuit~~ | ~~Source blocks have no DAG edges~~ | **DONE (Phase 2.4)** |
+| Low symmetry on some circuits | Matched pairs not recognized across certain block types | Requires improved pattern matcher |
+| Small circuit aspect ratio | Only 3-4 devices, too few for multi-column | Inherent limitation |
 
 ## Architecture
 
