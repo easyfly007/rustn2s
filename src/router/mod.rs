@@ -118,35 +118,57 @@ impl SchematicRouter {
     ) {
         if pins.len() < 2 { return; }
 
-        let anchor = pins[0];
-        for &target in &pins[1..] {
-            let dist = anchor.distance_to(&target);
+        // Build MST edges for this net instead of star topology
+        let edges = minimum_spanning_tree(pins);
+
+        // Track which pins need labels (long-distance connections)
+        let mut label_pins: HashSet<usize> = HashSet::new();
+
+        for &(i, j) in &edges {
+            let from = pins[i];
+            let to = pins[j];
+            let dist = from.distance_to(&to);
 
             if dist >= opts.long_net_threshold {
-                // Long net: use labels
-                schematic.labels.push(Label {
-                    name: net_name.into(),
-                    position: anchor.snap_to_grid(opts.grid_size),
-                });
-                schematic.labels.push(Label {
-                    name: net_name.into(),
-                    position: target.snap_to_grid(opts.grid_size),
-                });
+                // Long edge: mark both endpoints for labeling
+                label_pins.insert(i);
+                label_pins.insert(j);
             } else {
-                // Short net: L-route wire
-                let pts = l_route(anchor, target);
-                let clean: Vec<Point> = snap_and_dedup(&pts, opts.grid_size);
+                // Short edge: L-route wire, trying both orientations
+                let wire_pts = l_route_best(from, to, &schematic.wires);
+                let clean: Vec<Point> = snap_and_dedup(&wire_pts, opts.grid_size);
                 if clean.len() >= 2 {
                     schematic.wires.push(Wire { points: clean });
                 }
             }
         }
 
-        // Junction at anchor if >2 pins
-        if pins.len() > 2 {
-            schematic.junctions.push(Junction {
-                position: anchor.snap_to_grid(opts.grid_size),
+        // Emit one label per pin that needs labeling (deduplicated)
+        let mut labeled_positions: Vec<Point> = Vec::new();
+        for &pi in &label_pins {
+            let pos = pins[pi].snap_to_grid(opts.grid_size);
+            // Skip if we already have a label at this position
+            if labeled_positions.iter().any(|p| close(p, &pos)) {
+                continue;
+            }
+            labeled_positions.push(pos);
+            schematic.labels.push(Label {
+                name: net_name.into(),
+                position: pos,
             });
+        }
+
+        // Junction at any pin connected by more than one MST edge
+        let mut edge_count = vec![0usize; pins.len()];
+        for &(i, j) in &edges {
+            edge_count[i] += 1;
+            edge_count[j] += 1;
+        }
+        for (pi, &count) in edge_count.iter().enumerate() {
+            if count > 1 {
+                let pos = pins[pi].snap_to_grid(opts.grid_size);
+                schematic.junctions.push(Junction { position: pos });
+            }
         }
     }
 }
@@ -162,13 +184,123 @@ fn power_type_from_name(name: &str) -> PowerType {
     }
 }
 
-fn l_route(from: Point, to: Point) -> Vec<Point> {
+fn close(a: &Point, b: &Point) -> bool {
+    (a.x - b.x).abs() < 1.0 && (a.y - b.y).abs() < 1.0
+}
+
+/// Try both L-route orientations and pick the one with fewer crossings
+/// against existing wires.
+fn l_route_best(from: Point, to: Point, existing_wires: &[Wire]) -> Vec<Point> {
     if (from.x - to.x).abs() < 0.001 || (from.y - to.y).abs() < 0.001 {
-        vec![from, to]
-    } else {
-        // Horizontal first, then vertical
-        vec![from, Point::new(to.x, from.y), to]
+        // Already aligned: straight line, no choice needed
+        return vec![from, to];
     }
+
+    // Option A: horizontal first, then vertical
+    let route_a = vec![from, Point::new(to.x, from.y), to];
+    // Option B: vertical first, then horizontal
+    let route_b = vec![from, Point::new(from.x, to.y), to];
+
+    let crossings_a = count_crossings_with(&route_a, existing_wires);
+    let crossings_b = count_crossings_with(&route_b, existing_wires);
+
+    if crossings_b < crossings_a {
+        route_b
+    } else {
+        route_a // Default to horizontal-first on tie
+    }
+}
+
+/// Count how many times a candidate route crosses existing wire segments.
+fn count_crossings_with(route: &[Point], existing_wires: &[Wire]) -> usize {
+    let mut count = 0;
+    for k in 0..route.len().saturating_sub(1) {
+        let p1 = &route[k];
+        let p2 = &route[k + 1];
+        for wire in existing_wires {
+            for s in 0..wire.points.len().saturating_sub(1) {
+                let p3 = &wire.points[s];
+                let p4 = &wire.points[s + 1];
+                if segments_cross(p1, p2, p3, p4) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Test if two line segments have a strict interior crossing.
+fn segments_cross(p1: &Point, p2: &Point, p3: &Point, p4: &Point) -> bool {
+    let d1x = p2.x - p1.x;
+    let d1y = p2.y - p1.y;
+    let d2x = p4.x - p3.x;
+    let d2y = p4.y - p3.y;
+
+    let denom = d1x * d2y - d1y * d2x;
+    if denom.abs() < 1e-10 {
+        return false; // Parallel or collinear
+    }
+
+    let t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / denom;
+    let u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
+
+    let eps = 0.001;
+    t > eps && t < 1.0 - eps && u > eps && u < 1.0 - eps
+}
+
+/// Compute the minimum spanning tree of a set of points using Prim's algorithm.
+/// Returns edges as pairs of point indices.
+fn minimum_spanning_tree(pins: &[Point]) -> Vec<(usize, usize)> {
+    let n = pins.len();
+    if n <= 1 {
+        return Vec::new();
+    }
+    if n == 2 {
+        return vec![(0, 1)];
+    }
+
+    let mut in_tree = vec![false; n];
+    let mut min_cost = vec![f64::MAX; n];
+    let mut min_edge = vec![0usize; n]; // which tree node gives the min cost
+
+    let mut edges = Vec::with_capacity(n - 1);
+
+    // Start from node 0
+    in_tree[0] = true;
+    for j in 1..n {
+        min_cost[j] = pins[0].distance_to(&pins[j]);
+        min_edge[j] = 0;
+    }
+
+    for _ in 0..n - 1 {
+        // Find the closest non-tree node
+        let mut best = usize::MAX;
+        let mut best_cost = f64::MAX;
+        for j in 0..n {
+            if !in_tree[j] && min_cost[j] < best_cost {
+                best_cost = min_cost[j];
+                best = j;
+            }
+        }
+        if best == usize::MAX { break; }
+
+        in_tree[best] = true;
+        edges.push((min_edge[best], best));
+
+        // Update costs
+        for j in 0..n {
+            if !in_tree[j] {
+                let d = pins[best].distance_to(&pins[j]);
+                if d < min_cost[j] {
+                    min_cost[j] = d;
+                    min_edge[j] = best;
+                }
+            }
+        }
+    }
+
+    edges
 }
 
 fn snap_and_dedup(pts: &[Point], grid: f64) -> Vec<Point> {
