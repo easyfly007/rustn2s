@@ -43,6 +43,10 @@ struct Cli {
     /// Hide grid in SVG output
     #[arg(long)]
     no_grid: bool,
+
+    /// Render subcircuit instances as boxes with ports (hierarchical view)
+    #[arg(long)]
+    hierarchical: bool,
 }
 
 fn main() {
@@ -63,15 +67,22 @@ fn main() {
             recognize_patterns: !cli.no_patterns,
             ..Default::default()
         },
+        hierarchical: cli.hierarchical,
     };
 
-    let schematic = match n2s::convert_file(&cli.input, &opts) {
-        Ok(s) => s,
+    let spice_text = std::fs::read_to_string(&cli.input)
+        .unwrap_or_else(|e| {
+            eprintln!("Error reading {}: {}", cli.input, e);
+            std::process::exit(1);
+        });
+    let conv = match n2s::convert_full(&spice_text, &opts) {
+        Ok(r) => r,
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
     };
+    let schematic = &conv.schematic;
 
     for output in &cli.output {
         let result = if output.ends_with(".svg") {
@@ -80,9 +91,9 @@ fn main() {
                 show_grid: !cli.no_grid,
                 ..Default::default()
             };
-            svg::render_to_file(&schematic, output, &svg_opts)
+            svg::render_to_file_with_symbols(schematic, output, &svg_opts, &conv.subcircuit_symbols)
         } else if output.ends_with(".json") {
-            json::render_to_file(&schematic, output)
+            json::render_to_file(schematic, output)
         } else {
             Err(format!("Unknown output format: {}. Use .svg or .json", output))
         };

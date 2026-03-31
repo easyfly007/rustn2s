@@ -471,9 +471,35 @@ Three improvements to `src/router/mod.rs`:
 
 ### Phase 4 — Advanced Features
 
+#### Phase 4.1 — Hierarchical Schematic Rendering (DONE)
+
+**Problem:** Subcircuit instances (X devices) were always flattened — the pipeline used the first subcircuit's internal devices, discarding the top-level view.
+
+**Solution:** Added `--hierarchical` flag that renders X instances as rectangular boxes with labeled ports:
+
+1. **Dynamic symbol generation** (`builtin_symbols::create_subcircuit_symbol`): Creates a `SymbolDef` for each `.subckt` definition — a rectangle with ports split left/right, stub lines, and the subcircuit name centered.
+
+2. **Mode selection** (`lib.rs`): When `--hierarchical` is set and the netlist has both X instances and `.subckt` definitions, uses top-level devices with generated subcircuit symbols. Otherwise, falls back to flat mode.
+
+3. **Router integration**: `route_with_subcircuits()` maps X device nodes directly to subcircuit symbol pin positions.
+
+4. **SVG export**: `render_to_svg_with_symbols()` / `render_to_file_with_symbols()` accept extra symbols alongside builtins.
+
+**Usage:**
+```bash
+# Flat mode (default — expands subcircuits to individual devices)
+n2s circuit.sp -o schematic.svg
+
+# Hierarchical mode — shows X instances as boxes
+n2s circuit.sp -o schematic.svg --hierarchical
+```
+
+**Backwards compatible:** Default mode unchanged. Existing scores unaffected. `n2s-improve` always uses flat mode.
+
+#### Phase 4.2–4.4 — Remaining Features (TODO)
+
 | Feature | Description |
 |---------|-------------|
-| **Hierarchical schematic rendering** | Currently subcircuits are flattened; render subcircuit instances as boxes with labeled ports |
 | **Signal flow direction** | Enforce left-to-right signal flow: inputs on left, outputs on right |
 | **Net-aware label placement** | Place labels at pin positions with offset to avoid overlapping component graphics |
 | **Interactive parameter search** | `n2s-improve` tries multiple parameter combinations and picks the best score |

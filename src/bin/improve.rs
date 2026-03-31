@@ -149,6 +149,7 @@ fn main() {
                 recognize_patterns: !cli.no_patterns,
                 ..Default::default()
             },
+            hierarchical: false, // Always use flat mode for optimization
         };
 
         // Run the pipeline

@@ -339,6 +339,79 @@ pub mod builtin_symbols {
     pub fn create_ccvs() -> SymbolDef { create_controlled_source("ccvs") }
     pub fn create_cccs() -> SymbolDef { create_controlled_source("cccs") }
 
+    /// Create a dynamic symbol for a subcircuit instance.
+    /// Rendered as a rectangular box with labeled ports on left and right sides.
+    pub fn create_subcircuit_symbol(subckt_name: &str, port_names: &[String]) -> SymbolDef {
+        let n = port_names.len();
+        // Split ports: first half on left, second half on right
+        let left_count = (n + 1) / 2;
+        let right_count = n - left_count;
+
+        let pin_spacing = 20.0;
+        let box_height = (left_count.max(right_count).max(1) as f64) * pin_spacing + 10.0;
+        let half_h = box_height / 2.0;
+        let box_width = 60.0;
+        let half_w = box_width / 2.0;
+
+        let mut pins = Vec::new();
+        let mut graphics = Vec::new();
+
+        // Box outline
+        graphics.push(SymbolGraphic::Rect {
+            x: -half_w, y: -half_h,
+            width: box_width, height: box_height,
+            filled: true,
+        });
+
+        // Left-side ports
+        for i in 0..left_count {
+            let y = -half_h + pin_spacing * 0.5 + (i as f64) * pin_spacing + 5.0;
+            let pin_x = -half_w - 15.0;
+            pins.push(SymbolPin {
+                name: port_names[i].clone(),
+                pin_number: (i + 1) as i32,
+                offset: Point::new(pin_x, y),
+                direction: PinDirection::Left,
+            });
+            // Stub line from pin to box edge
+            graphics.push(SymbolGraphic::Line {
+                x1: pin_x, y1: y,
+                x2: -half_w, y2: y,
+            });
+        }
+
+        // Right-side ports
+        for i in 0..right_count {
+            let y = -half_h + pin_spacing * 0.5 + (i as f64) * pin_spacing + 5.0;
+            let pin_x = half_w + 15.0;
+            let port_idx = left_count + i;
+            pins.push(SymbolPin {
+                name: port_names[port_idx].clone(),
+                pin_number: (port_idx + 1) as i32,
+                offset: Point::new(pin_x, y),
+                direction: PinDirection::Right,
+            });
+            // Stub line from box edge to pin
+            graphics.push(SymbolGraphic::Line {
+                x1: half_w, y1: y,
+                x2: pin_x, y2: y,
+            });
+        }
+
+        // Subcircuit name text in center
+        graphics.push(SymbolGraphic::Text {
+            x: 0.0, y: 0.0,
+            text: subckt_name.to_string(),
+            font_size: 10.0,
+        });
+
+        SymbolDef {
+            name: format!("subckt_{}", subckt_name),
+            pins,
+            graphics,
+        }
+    }
+
     /// Get all builtin symbols as a HashMap keyed by name.
     pub fn all() -> HashMap<String, SymbolDef> {
         let syms = vec![

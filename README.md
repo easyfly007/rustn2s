@@ -53,6 +53,7 @@ Options:
   --no-patterns              Disable pattern recognition
   --scale <F64>              SVG scale factor [default: 1.0]
   --no-grid                  Hide grid in SVG output
+  --hierarchical             Render subcircuit instances as boxes with ports
 ```
 
 ### Example SPICE Input

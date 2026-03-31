@@ -67,7 +67,15 @@ impl Default for SvgOptions {
 }
 
 pub fn render_to_svg(schematic: &Schematic, opts: &SvgOptions) -> String {
-    let symbols = builtin_symbols::all();
+    render_to_svg_with_symbols(schematic, opts, &HashMap::new())
+}
+
+pub fn render_to_svg_with_symbols(
+    schematic: &Schematic, opts: &SvgOptions,
+    extra_symbols: &HashMap<String, crate::model::SymbolDef>,
+) -> String {
+    let mut symbols = builtin_symbols::all();
+    symbols.extend(extra_symbols.iter().map(|(k, v)| (k.clone(), v.clone())));
     let bounds = compute_bounds(schematic, &symbols);
     let margin = opts.margin;
     let w = (bounds.2 + margin * 2.0) * opts.scale;
@@ -132,7 +140,14 @@ pub fn render_to_svg(schematic: &Schematic, opts: &SvgOptions) -> String {
 }
 
 pub fn render_to_file(schematic: &Schematic, path: &str, opts: &SvgOptions) -> Result<(), String> {
-    let svg = render_to_svg(schematic, opts);
+    render_to_file_with_symbols(schematic, path, opts, &HashMap::new())
+}
+
+pub fn render_to_file_with_symbols(
+    schematic: &Schematic, path: &str, opts: &SvgOptions,
+    extra_symbols: &HashMap<String, crate::model::SymbolDef>,
+) -> Result<(), String> {
+    let svg = render_to_svg_with_symbols(schematic, opts, extra_symbols);
     std::fs::write(path, &svg).map_err(|e| format!("Cannot write {}: {}", path, e))
 }
 

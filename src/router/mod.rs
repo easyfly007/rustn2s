@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use crate::parser::{SpiceDevice, pin_names_for_symbol};
+use crate::parser::SpiceDevice;
 use crate::placer::{PlacementResult, SchematicPlacer};
 use crate::model::{
     Schematic, Component, Wire, Label, PowerSymbol, Junction, PowerType, Point,
-    builtin_symbols,
+    SymbolDef, builtin_symbols,
 };
 
 pub struct RouterOptions {
@@ -31,7 +31,19 @@ impl SchematicRouter {
         power_nets: &HashSet<String>,
         opts: &RouterOptions,
     ) -> Schematic {
-        let symbols = builtin_symbols::all();
+        self.route_with_subcircuits(placement, devices, power_nets, opts, &HashMap::new())
+    }
+
+    /// Build the final Schematic, with additional subcircuit symbols for X instances.
+    pub fn route_with_subcircuits(
+        &self,
+        placement: PlacementResult,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
+        opts: &RouterOptions,
+        subckt_symbols: &HashMap<String, SymbolDef>,
+    ) -> Schematic {
+        let builtin = builtin_symbols::all();
         let mut schematic = Schematic::new("");
 
         // Build components and collect net→pin positions
@@ -62,22 +74,24 @@ impl SchematicRouter {
             });
 
             // Map SPICE nodes to pin world positions
-            let pin_names = pin_names_for_symbol(&sym_name);
-            let sym_def = symbols.get(&sym_name);
+            // For X devices, use the subcircuit symbol's pin definitions
+            let sym_def = subckt_symbols.get(&sym_name)
+                .or_else(|| builtin.get(&sym_name));
 
-            for (i, node) in device.nodes.iter().enumerate() {
-                if i >= pin_names.len() { break; }
-                let pin_pos = if let Some(sym) = sym_def {
-                    if let Some(sp) = sym.pins.iter().find(|p| p.name == pin_names[i]) {
-                        let offset = sp.offset.transform(dp.rotation, dp.mirrored);
-                        dp.position + offset
-                    } else {
-                        dp.position
-                    }
-                } else {
-                    dp.position
-                };
-                net_connections.entry(node.clone()).or_default().push(pin_pos);
+            // For subcircuit instances, nodes map directly to ports by position
+            if let Some(sym) = sym_def {
+                for (i, node) in device.nodes.iter().enumerate() {
+                    if i >= sym.pins.len() { break; }
+                    let pin = &sym.pins[i];
+                    let offset = pin.offset.transform(dp.rotation, dp.mirrored);
+                    let pin_pos = dp.position + offset;
+                    net_connections.entry(node.clone()).or_default().push(pin_pos);
+                }
+            } else {
+                // Fallback: place all nodes at component center
+                for node in &device.nodes {
+                    net_connections.entry(node.clone()).or_default().push(dp.position);
+                }
             }
         }
 

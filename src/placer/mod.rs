@@ -66,6 +66,7 @@ impl SchematicPlacer {
             'G' => "vccs".into(),
             'H' => "ccvs".into(),
             'F' => "cccs".into(),
+            'X' => format!("subckt_{}", device.model_or_value),
             _ => "resistor".into(),
         }
     }
