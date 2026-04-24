@@ -3,8 +3,19 @@ use crate::parser::SpiceDevice;
 use crate::placer::{PlacementResult, SchematicPlacer};
 use crate::model::{
     Schematic, Component, Wire, Label, PowerSymbol, Junction, PowerType, Point,
-    SymbolDef, builtin_symbols,
+    SymbolDef, PinDirection, builtin_symbols,
 };
+
+/// A pin's world-space position plus the outward offset to apply when placing
+/// a label at that pin so the label does not overlap the component graphic.
+#[derive(Clone, Copy)]
+struct PinInfo {
+    position: Point,
+    /// Offset vector added to `position` to get a label center clear of the
+    /// component body. `(0, 0)` means the pin has no known direction; labels
+    /// fall back to the raw pin position (old behavior).
+    label_offset: Point,
+}
 
 pub struct RouterOptions {
     pub long_net_threshold: f64,
@@ -46,8 +57,8 @@ impl SchematicRouter {
         let builtin = builtin_symbols::all();
         let mut schematic = Schematic::new("");
 
-        // Build components and collect net→pin positions
-        let mut net_connections: HashMap<String, Vec<Point>> = HashMap::new();
+        // Build components and collect net→pin (position + outward label offset)
+        let mut net_connections: HashMap<String, Vec<PinInfo>> = HashMap::new();
 
         for dp in &placement.placements {
             let device = &devices[dp.device_index];
@@ -85,12 +96,21 @@ impl SchematicRouter {
                     let pin = &sym.pins[i];
                     let offset = pin.offset.transform(dp.rotation, dp.mirrored);
                     let pin_pos = dp.position + offset;
-                    net_connections.entry(node.clone()).or_default().push(pin_pos);
+                    let label_offset = label_offset_for_pin(
+                        pin.direction, dp.rotation, dp.mirrored,
+                    );
+                    net_connections.entry(node.clone()).or_default().push(PinInfo {
+                        position: pin_pos,
+                        label_offset,
+                    });
                 }
             } else {
-                // Fallback: place all nodes at component center
+                // Fallback: place all nodes at component center (no direction)
                 for node in &device.nodes {
-                    net_connections.entry(node.clone()).or_default().push(dp.position);
+                    net_connections.entry(node.clone()).or_default().push(PinInfo {
+                        position: dp.position,
+                        label_offset: Point::new(0.0, 0.0),
+                    });
                 }
             }
         }
@@ -110,11 +130,11 @@ impl SchematicRouter {
     }
 
     fn route_power_net(
-        &self, schematic: &mut Schematic, net_name: &str, pins: &[Point], opts: &RouterOptions,
+        &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
     ) {
         let ptype = power_type_from_name(net_name);
-        for &pin_pos in pins {
-            let mut sym_pos = pin_pos.snap_to_grid(opts.grid_size);
+        for pin in pins {
+            let mut sym_pos = pin.position.snap_to_grid(opts.grid_size);
             match ptype {
                 PowerType::GND => sym_pos.y += 10.0,
                 _ => sym_pos.y -= 10.0,
@@ -128,19 +148,20 @@ impl SchematicRouter {
     }
 
     fn route_signal_net(
-        &self, schematic: &mut Schematic, net_name: &str, pins: &[Point], opts: &RouterOptions,
+        &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
     ) {
         if pins.len() < 2 { return; }
 
-        // Build MST edges for this net instead of star topology
-        let edges = minimum_spanning_tree(pins);
+        // MST operates on pin positions only
+        let positions: Vec<Point> = pins.iter().map(|p| p.position).collect();
+        let edges = minimum_spanning_tree(&positions);
 
         // Track which pins need labels (long-distance connections)
         let mut label_pins: HashSet<usize> = HashSet::new();
 
         for &(i, j) in &edges {
-            let from = pins[i];
-            let to = pins[j];
+            let from = positions[i];
+            let to = positions[j];
             let dist = from.distance_to(&to);
 
             if dist >= opts.long_net_threshold {
@@ -157,19 +178,31 @@ impl SchematicRouter {
             }
         }
 
-        // Emit one label per pin that needs labeling (deduplicated)
+        // Emit one label per pin that needs labeling (deduplicated).
+        // The label sits at pin_pos + label_offset so it clears the component
+        // graphic, and a short stub wire connects the pin to the label anchor.
         let mut labeled_positions: Vec<Point> = Vec::new();
         for &pi in &label_pins {
-            let pos = pins[pi].snap_to_grid(opts.grid_size);
-            // Skip if we already have a label at this position
-            if labeled_positions.iter().any(|p| close(p, &pos)) {
+            let pin = &pins[pi];
+            let label_pos = (pin.position + pin.label_offset).snap_to_grid(opts.grid_size);
+
+            // Skip duplicate labels at the same anchor point
+            if labeled_positions.iter().any(|p| close(p, &label_pos)) {
                 continue;
             }
-            labeled_positions.push(pos);
+            labeled_positions.push(label_pos);
             schematic.labels.push(Label {
                 name: net_name.into(),
-                position: pos,
+                position: label_pos,
             });
+
+            // Draw a stub wire from the pin to the label anchor so the
+            // schematic stays electrically readable. Skip if the offset is
+            // zero (fallback path — label coincides with pin).
+            let pin_snapped = pin.position.snap_to_grid(opts.grid_size);
+            if !close(&pin_snapped, &label_pos) {
+                schematic.wires.push(Wire { points: vec![pin_snapped, label_pos] });
+            }
         }
 
         // Junction at any pin connected by more than one MST edge
@@ -180,11 +213,26 @@ impl SchematicRouter {
         }
         for (pi, &count) in edge_count.iter().enumerate() {
             if count > 1 {
-                let pos = pins[pi].snap_to_grid(opts.grid_size);
+                let pos = positions[pi].snap_to_grid(opts.grid_size);
                 schematic.junctions.push(Junction { position: pos });
             }
         }
     }
+}
+
+/// Compute the outward offset vector to shift a label away from its pin so
+/// the label rectangle clears the component body. Horizontal pins get a
+/// larger offset because the label is wider than it is tall.
+fn label_offset_for_pin(dir: PinDirection, rotation: i32, mirrored: bool) -> Point {
+    // Magnitude: label rect is 50 wide × 16 tall, so 30 along the horizontal
+    // axis and 15 along the vertical axis clear the pin stub comfortably.
+    let raw = match dir {
+        PinDirection::Left  => Point::new(-30.0, 0.0),
+        PinDirection::Right => Point::new( 30.0, 0.0),
+        PinDirection::Up    => Point::new(  0.0, -15.0),
+        PinDirection::Down  => Point::new(  0.0,  15.0),
+    };
+    raw.transform(rotation, mirrored)
 }
 
 fn power_type_from_name(name: &str) -> PowerType {

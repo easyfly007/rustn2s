@@ -518,9 +518,31 @@ Sources (no incoming edges) and isolated blocks (handled by Phase 2.4) are inten
 
 The op-amp topologies benefit most because they have well-defined signal chains terminating in output loads; pushing those loads (C3 in 07, C1 in 10) to the rightmost layer improves wire length and label ratio sub-scores. Linear circuits (01–03) and circuits already fully balanced (05, 11) see no change because their sinks were already at `max_layer`.
 
-#### Phase 4.3–4.4 — Remaining Features (TODO)
+#### Phase 4.3 — Net-Aware Label Placement (DONE)
+
+**Problem:** The router emitted labels at the raw pin world position. The label rectangle (50×16 units) then overlapped the component graphic, because the pin sits on the edge of the symbol body. Net names were often drawn on top of MOSFET channels or BJT bodies, hurting readability and making multi-pin labels visually ambiguous.
+
+**Solution:** Tracked per-pin direction alongside pin world position and shifted each label outward along that direction. Changes in `src/router/mod.rs`:
+
+1. New `PinInfo { position, label_offset }` replaces the bare `Point` in `net_connections`. The `label_offset` is computed from `PinDirection` with `(rotation, mirrored)` applied, so it is valid in world space.
+2. `label_offset_for_pin()` maps direction → offset: ±30 units along the horizontal axis (label is 50 wide), ±15 units along the vertical axis (label is 16 tall). This clears the label rectangle past the pin stub.
+3. When a label is emitted, a short stub wire from the pin position to the label anchor is added so the net is still electrically connected through the schematic.
+
+**Results after Phase 4.3** (median over 5 runs; scoring has HashMap-induced noise):
+
+| Example | Before 4.3 | After 4.3 | Δ |
+|---------|:---:|:---:|:---:|
+| **04 NMOS CS amp** | 0.825 | **0.829** | **+0.004** |
+| **05 current mirror** | 0.875 | **0.892** | **+0.017** |
+| **07 two-stage opamp** | 0.968 | **0.978** | **+0.010** |
+| **08 bandgap** | 0.808 | **0.820** | **+0.012** |
+| **10 opamp feedback** | 0.943 | **0.952** | **+0.009** |
+| All others | unchanged | unchanged | — |
+
+Five circuits improved on the median; no regressions. Gains come from the `label_ratio` sub-score — the offset labels and stub wires count as shorter overall label-to-pin distances, and Phase 4.3 also allowed deduplication (one label per pin anchor) to operate on the offset position rather than the raw pin.
+
+#### Phase 4.4 — Remaining Features (TODO)
 
 | Feature | Description |
 |---------|-------------|
-| **Net-aware label placement** | Place labels at pin positions with offset to avoid overlapping component graphics |
 | **Interactive parameter search** | `n2s-improve` tries multiple parameter combinations and picks the best score |
