@@ -98,19 +98,37 @@ impl CircuitAnalyzer {
     // Pattern finders
     // ========================================================================
 
+    /// Return the transistor type string for three-terminal devices whose
+    /// node order is (drain/collector, gate/base, source/emitter). Returns
+    /// `Some("nmos4"|"pmos4")` for MOSFETs (need bulk → 4 nodes) and
+    /// `Some("npn"|"pnp")` for BJTs (3 or 4 nodes). Returns `None` for
+    /// anything else, so a single filter gate handles both device families.
+    fn transistor_type(dev: &SpiceDevice) -> Option<String> {
+        match dev.device_type {
+            'M' if dev.nodes.len() >= 4 => Some(SpiceParser::infer_mos_type(dev).to_string()),
+            'Q' if dev.nodes.len() >= 3 => Some(SpiceParser::infer_bjt_type(dev).to_string()),
+            _ => None,
+        }
+    }
+
     fn find_diff_pairs(
         &self, devices: &[SpiceDevice], power_nets: &HashSet<String>,
         assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
     ) {
-        // Group unassigned MOSFETs by (mos_type, source_net)
+        // Group unassigned transistors (MOSFET or BJT) by (type, source/emitter).
+        // BJTs share the node[0..3] = (collector, base, emitter) convention,
+        // so the rest of the matching logic is identical.
         let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
 
         for (i, dev) in devices.iter().enumerate() {
-            if assigned.contains(&i) || dev.device_type != 'M' || dev.nodes.len() < 4 { continue; }
-            let mos_type = SpiceParser::infer_mos_type(dev).to_string();
+            if assigned.contains(&i) { continue; }
+            let ttype = match Self::transistor_type(dev) {
+                Some(t) => t,
+                None => continue,
+            };
             let source = &dev.nodes[2];
             if power_nets.contains(&source.to_lowercase()) { continue; }
-            groups.entry((mos_type, source.clone())).or_default().push(i);
+            groups.entry((ttype, source.clone())).or_default().push(i);
         }
 
         for group in groups.values() {
@@ -138,11 +156,16 @@ impl CircuitAnalyzer {
                         assigned.insert(group[a]);
                         assigned.insert(group[b]);
 
-                        // Try to find tail current source
+                        // Try to find tail current source: a MOSFET/BJT with
+                        // drain/collector on the tail net, or an I source with
+                        // positive terminal on tail (e.g. `I1 tail 0 1m` in a
+                        // BJT diff pair).
                         let tail_net = &ma.nodes[2];
                         for (k, dev) in devices.iter().enumerate() {
                             if assigned.contains(&k) { continue; }
-                            if dev.device_type == 'M' && !dev.nodes.is_empty() && dev.nodes[0] == *tail_net {
+                            if dev.nodes.is_empty() || dev.nodes[0] != *tail_net { continue; }
+                            let is_tail_source = matches!(dev.device_type, 'M' | 'Q' | 'I');
+                            if is_tail_source {
                                 block.device_indices.push(k);
                                 for n in &dev.nodes { block.all_nets.insert(n.clone()); }
                                 assigned.insert(k);
@@ -163,12 +186,18 @@ impl CircuitAnalyzer {
         &self, devices: &[SpiceDevice], _power_nets: &HashSet<String>,
         assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
     ) {
-        // Group by (mos_type, gate_net, source_net)
+        // Group unassigned transistors by (type, gate/base_net, source/emitter_net).
+        // Mirror criterion: shared control and reference terminals, with at
+        // least one device diode-connected (drain/collector == gate/base).
         let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
 
         for (i, dev) in devices.iter().enumerate() {
-            if assigned.contains(&i) || dev.device_type != 'M' || dev.nodes.len() < 3 { continue; }
-            let key = format!("{}|{}|{}", SpiceParser::infer_mos_type(dev), dev.nodes[1], dev.nodes[2]);
+            if assigned.contains(&i) { continue; }
+            let ttype = match Self::transistor_type(dev) {
+                Some(t) => t,
+                None => continue,
+            };
+            let key = format!("{}|{}|{}", ttype, dev.nodes[1], dev.nodes[2]);
             groups.entry(key).or_default().push(i);
         }
 
@@ -211,17 +240,19 @@ impl CircuitAnalyzer {
         assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
     ) {
         for i in 0..devices.len() {
-            if assigned.contains(&i) || devices[i].device_type != 'M' || devices[i].nodes.len() < 4 {
-                continue;
-            }
+            if assigned.contains(&i) { continue; }
+            let ti = match Self::transistor_type(&devices[i]) {
+                Some(t) => t,
+                None => continue,
+            };
             for j in 0..devices.len() {
-                if i == j || assigned.contains(&j) || devices[j].device_type != 'M' || devices[j].nodes.len() < 4 {
-                    continue;
-                }
-                if SpiceParser::infer_mos_type(&devices[i]) != SpiceParser::infer_mos_type(&devices[j]) {
-                    continue;
-                }
-                // di.source == dj.drain (di is upper, dj is lower)
+                if i == j || assigned.contains(&j) { continue; }
+                let tj = match Self::transistor_type(&devices[j]) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                if ti != tj { continue; }
+                // di.source/emitter == dj.drain/collector (di is upper, dj is lower)
                 if devices[i].nodes[2] == devices[j].nodes[0] && devices[i].nodes[1] != devices[j].nodes[1] {
                     let mut block = FunctionalBlock {
                         block_type: BlockType::CascodePair,
@@ -536,6 +567,23 @@ mod tests {
         let dp = blocks.iter().find(|b| b.block_type == BlockType::DiffPair);
         assert!(dp.is_some());
         // Diff pair should include M3 as tail
+        assert_eq!(dp.unwrap().device_indices.len(), 3);
+    }
+
+    #[test]
+    fn test_bjt_diff_pair_detection() {
+        // NPN diff pair with a current source (I1) acting as tail.
+        let spice = "* BJT Diff Pair\n\
+                     Q1 out1 inp tail NPN_MOD\n\
+                     Q2 out2 inm tail NPN_MOD\n\
+                     I1 tail 0 1m\n";
+        let mut parser = SpiceParser::new();
+        let pr = parser.parse(spice);
+        let analyzer = CircuitAnalyzer::new();
+        let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
+        let dp = blocks.iter().find(|b| b.block_type == BlockType::DiffPair);
+        assert!(dp.is_some(), "Q1/Q2 should be recognized as a BJT diff pair");
+        // Diff pair should pull in I1 as the tail source
         assert_eq!(dp.unwrap().device_indices.len(), 3);
     }
 }

@@ -152,10 +152,12 @@ Scans all unassigned devices in this order:
 
 | Priority | Pattern | Detection Criteria |
 |---------|---------|-------------------|
-| 1 | **Differential Pair** | Two MOSFETs: same type + same source (non-power) + different gates + different drains. Optional tail current source. |
-| 2 | **Current Mirror** | ≥2 MOSFETs: same type + same gate + same source. At least one diode-connected (drain=gate). |
-| 3 | **Cascode Pair** | Two MOSFETs: same type + upper.source = lower.drain + different gates. |
+| 1 | **Differential Pair** | Two transistors (MOSFET or BJT): same type + same source/emitter (non-power) + different gates/bases + different drains/collectors. Tail search pulls in a matching MOSFET, BJT, or I current source whose output terminal is the shared source/emitter. |
+| 2 | **Current Mirror** | ≥2 transistors (MOSFET or BJT): same type + same gate/base + same source/emitter. At least one diode-connected (drain/collector = gate/base). |
+| 3 | **Cascode Pair** | Two transistors (MOSFET or BJT): same type + upper.source/emitter = lower.drain/collector + different gates/bases. |
 | 4 | **Inverter** | NMOS + PMOS: same gate + same drain + both sources on power nets. |
+
+Diff pair / mirror / cascode detection is transistor-family-agnostic: the shared helper `transistor_type()` returns `nmos4/pmos4/npn/pnp`, and the rest of the matching logic uses the `(drain|collector, gate|base, source|emitter)` node-0/1/2 convention that both families share.
 
 **Stage 2: Hierarchical Agglomerative Clustering (HAC)**
 
