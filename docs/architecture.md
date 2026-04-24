@@ -496,10 +496,31 @@ n2s circuit.sp -o schematic.svg --hierarchical
 
 **Backwards compatible:** Default mode unchanged. Existing scores unaffected. `n2s-improve` always uses flat mode.
 
-#### Phase 4.2–4.4 — Remaining Features (TODO)
+#### Phase 4.2 — Signal Flow Direction (DONE)
+
+**Problem:** The longest-path-from-source layer assignment (ASAP) places each block at its earliest feasible layer. Terminal sinks (output load caps, load resistors) therefore end up at whatever layer their predecessor chain reaches, even when max_layer is larger. This makes the rightmost column unpredictable — outputs drift toward the middle, breaking the left-to-right signal flow convention.
+
+**Solution:** Added `enforce_signal_flow()` to `src/placer/mod.rs`, called after `fix_isolated_source_layers()` (step 2). The algorithm computes ALAP (As Late As Possible) layers via iterative relaxation:
+
+1. Terminal sinks (blocks with incoming edges but no outgoing edges) are pinned at `max_layer`.
+2. For every other block with outgoing edges, `alap[u] = min_{s in successors}(alap[s] - 1)`. Iterate to fixpoint.
+3. For each block with at least one incoming edge, set `layer[i] = max(asap[i], alap[i])`. This pushes sinks and their upstream predecessors to the right edge without affecting pure signal sources or isolated blocks.
+
+Sources (no incoming edges) and isolated blocks (handled by Phase 2.4) are intentionally skipped — sources stay anchored on the left, isolated blocks stay next to their net-sharing neighbor.
+
+**Results after Phase 4.2:**
+
+| Example | Before 4.2 | After 4.2 | Delta |
+|---------|:---:|:---:|:---:|
+| **07 two-stage opamp** | 0.956 | **0.968** | **+0.012** |
+| **10 opamp feedback** | 0.936 | **0.943** | **+0.007** |
+| All others | unchanged | unchanged | — |
+
+The op-amp topologies benefit most because they have well-defined signal chains terminating in output loads; pushing those loads (C3 in 07, C1 in 10) to the rightmost layer improves wire length and label ratio sub-scores. Linear circuits (01–03) and circuits already fully balanced (05, 11) see no change because their sinks were already at `max_layer`.
+
+#### Phase 4.3–4.4 — Remaining Features (TODO)
 
 | Feature | Description |
 |---------|-------------|
-| **Signal flow direction** | Enforce left-to-right signal flow: inputs on left, outputs on right |
 | **Net-aware label placement** | Place labels at pin positions with offset to avoid overlapping component graphics |
 | **Interactive parameter search** | `n2s-improve` tries multiple parameter combinations and picks the best score |

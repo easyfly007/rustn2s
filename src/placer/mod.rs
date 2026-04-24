@@ -94,6 +94,7 @@ impl SchematicPlacer {
         // 2. Assign layers (with source proximity fix)
         let mut layer_assignment = Self::assign_layers(&graph);
         Self::fix_isolated_source_layers(&mut layer_assignment, blocks, &graph);
+        Self::enforce_signal_flow(&mut layer_assignment, &graph);
 
         let max_layer = *layer_assignment.iter().max().unwrap_or(&0);
         let mut layers: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
@@ -527,6 +528,82 @@ impl SchematicPlacer {
         }
 
         layers
+    }
+
+    /// Enforce left-to-right signal flow by pushing terminal sinks and their
+    /// chains as far right as the DAG permits (ALAP for downstream nodes).
+    ///
+    /// A "terminal sink" is a block with incoming DAG edges but no outgoing
+    /// edges — e.g., output load caps, output resistors. These end up at
+    /// max_layer so outputs appear on the right side of the schematic.
+    ///
+    /// For each terminal sink, we also walk back through its predecessors and
+    /// raise them toward max_layer - 1, max_layer - 2, etc., as long as doing
+    /// so does not violate successor constraints. This prevents "gaps" where
+    /// a sink was pushed right but its predecessors remained at a low ASAP
+    /// layer, which would create long backward-looking connections.
+    fn enforce_signal_flow(layers: &mut [usize], graph: &BlockGraph) {
+        let n = graph.node_count;
+        if n == 0 { return; }
+        let max_layer = *layers.iter().max().unwrap_or(&0);
+        if max_layer == 0 { return; }
+
+        let mut has_in = vec![false; n];
+        let mut has_out = vec![false; n];
+        for &(from, to) in &graph.edges {
+            has_out[from] = true;
+            has_in[to] = true;
+        }
+
+        // ALAP computation: layer[v] = min over successors (layer[s]) - 1.
+        // Seed sinks with max_layer, all others with max_layer (upper bound),
+        // then relax iteratively in reverse topo-ish order.
+        //
+        // Only blocks with at least one outgoing edge are constrained by
+        // successors; terminal sinks are fixed at max_layer. Isolated blocks
+        // (no in, no out) keep their existing layer — they were already
+        // placed by fix_isolated_source_layers and should not move.
+        let mut alap = vec![max_layer; n];
+
+        // Iterate until fixpoint (DAG is small, this converges quickly).
+        loop {
+            let mut changed = false;
+            for u in 0..n {
+                if !has_out[u] { continue; } // sink: stays at max_layer
+                // For each successor, constrain alap[u] <= alap[s] - 1
+                let mut new_layer = max_layer;
+                for &s in &graph.adj[u] {
+                    if alap[s] == 0 {
+                        // Successor pinned at 0 — cannot place u earlier than itself;
+                        // keep u at its ASAP layer (no change from ALAP side).
+                        new_layer = new_layer.min(layers[u]);
+                    } else {
+                        new_layer = new_layer.min(alap[s] - 1);
+                    }
+                }
+                if new_layer != alap[u] {
+                    alap[u] = new_layer;
+                    changed = true;
+                }
+            }
+            if !changed { break; }
+        }
+
+        // Final layer: for non-isolated blocks, use max(ASAP, ALAP). Since
+        // ALAP >= ASAP by construction (ALAP starts at max_layer and only
+        // decreases via successor constraints, which are dominated by
+        // ASAP+path_length), this effectively pushes blocks to the right.
+        //
+        // Isolated blocks (no edges) are untouched.
+        for i in 0..n {
+            if !has_in[i] && !has_out[i] { continue; }
+            // Pure signal sources (no in-edges) stay at ASAP to keep inputs
+            // anchored on the left.
+            if !has_in[i] { continue; }
+            if alap[i] > layers[i] {
+                layers[i] = alap[i];
+            }
+        }
     }
 
     /// Move isolated blocks (no DAG edges) to the same layer as the
