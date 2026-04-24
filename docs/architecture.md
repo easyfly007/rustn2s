@@ -189,7 +189,7 @@ For remaining unassigned devices:
 | CascodePair | Vertical stack (upper on top, lower below) |
 | Inverter | PMOS on top (mirrored), NMOS below |
 | SingleDevice | Centered |
-| Unknown | Vertical stack |
+| Unknown | Group members by `device_match_key` (symbol + W/L + model). Pairs (exactly 2 matching devices) lay out side-by-side at the same y; singletons and larger groups stack vertically. |
 
 5. **Absolute Coordinates**: Layer index × `layer_spacing` for X, blocks stacked vertically within layer, all snapped to grid.
 

@@ -112,7 +112,7 @@ impl SchematicPlacer {
 
         // 4. Block-internal layouts
         let block_layouts: Vec<InternalLayout> = blocks.iter()
-            .map(|b| Self::layout_block(b, opts))
+            .map(|b| Self::layout_block(b, devices, opts))
             .collect();
 
         // 5. Absolute coordinates
@@ -200,6 +200,28 @@ impl SchematicPlacer {
         }
     }
 
+    /// Canonical key for identifying devices that should be laid out as a
+    /// matched pair — same symbol, same geometric parameters (W/L), same
+    /// model. Two devices with identical keys are considered electrically
+    /// and visually interchangeable, so the placer can put them at the same
+    /// y-coordinate for symmetric schematics.
+    fn device_match_key(dev: &SpiceDevice) -> String {
+        let sym_name = Self::symbol_for_device(dev);
+        let mut key_parts = vec![sym_name];
+        let mut props: Vec<(&str, &str)> = dev.parameters.iter()
+            .filter(|(k, _)| matches!(k.as_str(), "W" | "L"))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        props.push(("model", &dev.model_or_value));
+        props.sort();
+        for (k, v) in props {
+            if !v.is_empty() {
+                key_parts.push(format!("{}={}", k, v));
+            }
+        }
+        key_parts.join("|")
+    }
+
     // ========================================================================
     // Cross-block symmetry alignment
     // ========================================================================
@@ -229,23 +251,10 @@ impl SchematicPlacer {
             }
         }
 
-        // Group devices by matching key: (symbol_name, sorted properties)
+        // Group devices by matching key: (symbol_name, sorted W/L/model)
         let mut match_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (di, dev) in devices.iter().enumerate() {
-            let sym_name = Self::symbol_for_device(dev);
-            let mut key_parts = vec![sym_name];
-            let mut props: Vec<(&str, &str)> = dev.parameters.iter()
-                .filter(|(k, _)| matches!(k.as_str(), "W" | "L"))
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            props.push(("model", &dev.model_or_value));
-            props.sort();
-            for (k, v) in props {
-                if !v.is_empty() {
-                    key_parts.push(format!("{}={}", k, v));
-                }
-            }
-            let key = key_parts.join("|");
+            let key = Self::device_match_key(dev);
             match_groups.entry(key).or_default().push(di);
         }
 
@@ -698,7 +707,9 @@ impl SchematicPlacer {
     // Block-internal template layout
     // ========================================================================
 
-    fn layout_block(block: &FunctionalBlock, opts: &PlacerOptions) -> InternalLayout {
+    fn layout_block(
+        block: &FunctionalBlock, all_devices: &[SpiceDevice], opts: &PlacerOptions,
+    ) -> InternalLayout {
         let sp = opts.intra_block_spacing;
         let devices = &block.device_indices;
 
@@ -748,14 +759,79 @@ impl SchematicPlacer {
                 InternalLayout { placements, width: 60.0, height: 40.0 }
             }
             BlockType::Unknown => {
+                // Group block members by match key. Members whose key appears
+                // exactly twice are placed side-by-side at the same y so the
+                // symmetry metric sees them as aligned. Singletons (and any
+                // key with 3+ members) fall back to the vertical stack.
+                //
+                // Without device info, skip the grouping and use the original
+                // pure-vertical layout.
+                if all_devices.is_empty() {
+                    let mut placements = Vec::new();
+                    let mut y = 0.0;
+                    for &idx in devices {
+                        placements.push((idx, String::new(), Point::new(0.0, y), 0, false));
+                        y += sp;
+                    }
+                    let h = if devices.len() > 1 { (devices.len() - 1) as f64 * sp + 40.0 } else { 40.0 };
+                    return InternalLayout { placements, width: 60.0, height: h };
+                }
+
+                // First pass: compute a match key per device, preserving the
+                // first-seen order so the layout is deterministic.
+                let mut keys: Vec<String> = Vec::with_capacity(devices.len());
+                let mut key_groups: HashMap<String, Vec<usize>> = HashMap::new();
+                let mut order: Vec<String> = Vec::new();
+                for &di in devices {
+                    let key = if di < all_devices.len() {
+                        Self::device_match_key(&all_devices[di])
+                    } else {
+                        format!("_idx{}", di) // unique → never matches
+                    };
+                    if !key_groups.contains_key(&key) {
+                        order.push(key.clone());
+                    }
+                    key_groups.entry(key.clone()).or_default().push(di);
+                    keys.push(key);
+                }
+
                 let mut placements = Vec::new();
                 let mut y = 0.0;
-                for &idx in devices {
-                    placements.push((idx, String::new(), Point::new(0.0, y), 0, false));
-                    y += sp;
+                let mut max_width: f64 = 60.0;
+                let mut emitted: HashSet<usize> = HashSet::new();
+
+                for key in &order {
+                    let group = &key_groups[key];
+                    if group.len() == 2 {
+                        // Matched pair → horizontal split
+                        placements.push((group[0], String::new(),
+                            Point::new(-sp / 2.0, y), 0, false));
+                        placements.push((group[1], String::new(),
+                            Point::new( sp / 2.0, y), 0, false));
+                        emitted.insert(group[0]);
+                        emitted.insert(group[1]);
+                        max_width = max_width.max(sp + 60.0);
+                        y += sp;
+                    } else {
+                        // Singletons and 3+-groups: stack vertically in original order.
+                        for &di in group {
+                            placements.push((di, String::new(), Point::new(0.0, y), 0, false));
+                            emitted.insert(di);
+                            y += sp;
+                        }
+                    }
                 }
-                let h = if devices.len() > 1 { (devices.len() - 1) as f64 * sp + 40.0 } else { 40.0 };
-                InternalLayout { placements, width: 60.0, height: h }
+
+                // Safety: any device not yet emitted (shouldn't happen) stacks at the end.
+                for &di in devices {
+                    if !emitted.contains(&di) {
+                        placements.push((di, String::new(), Point::new(0.0, y), 0, false));
+                        y += sp;
+                    }
+                }
+
+                let h = (y - sp).max(0.0) + 40.0;
+                InternalLayout { placements, width: max_width, height: h }
             }
         }
     }

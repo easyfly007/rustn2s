@@ -265,7 +265,7 @@ All Phase 1–3 algorithmic issues have been addressed. Remaining quality gaps:
 | ~~Sources separated from circuit~~ | ~~Source blocks have no DAG edges~~ | **DONE (Phase 2.4)** |
 | ~~Labels overlapping component bodies~~ | ~~Router emitted labels at raw pin positions~~ | **DONE (Phase 4.3)** |
 | ~~BJT diff pair / mirror not recognized~~ | ~~Pattern finders hard-coded to `device_type == 'M'`~~ | **DONE (BJT pattern extension)** |
-| Low symmetry on 04 / 08 | 04 has a single MOSFET (no matched peer); 08's Q1/Q2 don't share emitter, so they aren't a diff pair — requires a generalized "matched device" detector beyond the four canonical patterns | Open |
+| ~~Low symmetry for matched pairs inside the same cluster block~~ | ~~`align_matched_pairs` only shifted whole blocks, so same-block pairs like 08's Q1/Q2 were left stacked~~ | **DONE (pair-aware `Unknown` template)** |
 | Small circuit aspect ratio | Only 3-4 devices, too few for multi-column | Inherent limitation |
 
 ## Architecture
