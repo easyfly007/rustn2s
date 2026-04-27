@@ -1,6 +1,6 @@
 # n2s — Netlist to Schematic
 
-A standalone Rust tool that converts SPICE netlists into visual schematics. Outputs SVG and structured JSON with zero GUI dependencies.
+A standalone Rust tool that converts SPICE netlists into visual schematics. Outputs SVG, structured JSON, and KiCad schematics with zero GUI dependencies.
 
 This is a Rust reimplementation of the N2S pipeline from the [MySchematic](https://github.com/) C++ project, eliminating the Qt dependency and producing a single statically-linked binary.
 
@@ -13,6 +13,7 @@ This is a Rust reimplementation of the N2S pipeline from the [MySchematic](https
 - **14 Builtin Symbols** — nmos4, pmos4, npn, pnp, resistor, capacitor, inductor, diode, vsource, isource, vcvs, vccs, ccvs, cccs
 - **SVG Output** — Dark theme, grid, legends, configurable scale
 - **JSON Output** — Structured schematic data for downstream tools
+- **KiCad Output** — Native `.kicad_sch` files, open directly in KiCad for editing
 
 ## Installation
 
@@ -37,6 +38,12 @@ n2s circuit.sp -o schematic.svg
 
 # Generate both SVG and JSON
 n2s circuit.sp -o schematic.svg -o schematic.json
+
+# Generate KiCad schematic
+n2s circuit.sp -o schematic.kicad_sch
+
+# Generate all formats at once
+n2s circuit.sp -o schematic.svg -o schematic.json -o schematic.kicad_sch
 ```
 
 ### Options
@@ -68,13 +75,14 @@ M2 out in GND GND nmos_3p3 W=1u L=0.35u
 
 ```rust
 use n2s::{convert_file, ConvertOptions};
-use n2s::export::{svg, json};
+use n2s::export::{svg, json, kicad};
 
 let opts = ConvertOptions::default();
 let schematic = convert_file("circuit.sp", &opts)?;
 
 svg::render_to_file(&schematic, "circuit.svg", &svg::SvgOptions::default())?;
 json::render_to_file(&schematic, "circuit.json")?;
+kicad::render_to_file(&schematic, "circuit.kicad_sch", &Default::default())?;
 ```
 
 ## Architecture
@@ -86,8 +94,8 @@ SPICE file
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
 │  Parser  │───▶│ Analyzer │───▶│  Placer  │───▶│  Router  │───▶│  Export  │
 └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-  Tokenize &      Pattern        Sugiyama        Manhattan       SVG / JSON
-  parse SPICE     recognition    hierarchical    routing &
+  Tokenize &      Pattern        Sugiyama        Manhattan       SVG / JSON /
+  parse SPICE     recognition    hierarchical    routing &       KiCad
   devices         + HAC          layout          labeling
                   clustering
 ```
@@ -99,7 +107,7 @@ SPICE file
 | `placer` | DAG construction, layer assignment, crossing minimization, coordinate assignment |
 | `router` | Net routing (wires, labels, power symbols), pin mapping with transforms |
 | `model` | Geometry primitives, symbol definitions, schematic data structures |
-| `export` | SVG renderer (dark theme) and JSON serializer |
+| `export` | SVG renderer (dark theme), JSON serializer, and KiCad `.kicad_sch` exporter |
 
 See [docs/architecture.md](docs/architecture.md) for detailed design documentation.
 

@@ -1,5 +1,5 @@
 use clap::Parser;
-use n2s::export::{svg, json};
+use n2s::export::{svg, json, kicad};
 use n2s::ConvertOptions;
 
 #[derive(Parser)]
@@ -8,7 +8,7 @@ struct Cli {
     /// Input SPICE netlist file
     input: String,
 
-    /// Output file(s) — format inferred from extension (.svg, .json)
+    /// Output file(s) — format inferred from extension (.svg, .json, .kicad_sch)
     #[arg(short, long, required = true)]
     output: Vec<String>,
 
@@ -94,8 +94,10 @@ fn main() {
             svg::render_to_file_with_symbols(schematic, output, &svg_opts, &conv.subcircuit_symbols)
         } else if output.ends_with(".json") {
             json::render_to_file(schematic, output)
+        } else if output.ends_with(".kicad_sch") {
+            kicad::render_to_file(schematic, output, &conv.subcircuit_symbols)
         } else {
-            Err(format!("Unknown output format: {}. Use .svg or .json", output))
+            Err(format!("Unknown output format: {}. Use .svg, .json, or .kicad_sch", output))
         };
 
         match result {
