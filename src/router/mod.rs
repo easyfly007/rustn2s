@@ -378,3 +378,162 @@ fn snap_and_dedup(pts: &[Point], grid: f64) -> Vec<Point> {
     }
     clean
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(x: f64, y: f64) -> Point { Point::new(x, y) }
+
+    // ---- power_type_from_name ----
+
+    #[test]
+    fn power_type_classifies_gnd_aliases() {
+        for name in ["0", "GND", "gnd", "vss", "VSS!", "AVSS"] {
+            assert_eq!(power_type_from_name(name), PowerType::GND, "{}", name);
+        }
+    }
+
+    #[test]
+    fn power_type_classifies_vdd_aliases() {
+        for name in ["VDD", "vdd", "VCC", "vcc!", "AVDD"] {
+            assert_eq!(power_type_from_name(name), PowerType::VDD, "{}", name);
+        }
+    }
+
+    #[test]
+    fn power_type_other_is_custom() {
+        for name in ["vout", "n1", "tail", "bias_p"] {
+            assert_eq!(power_type_from_name(name), PowerType::Custom, "{}", name);
+        }
+    }
+
+    // ---- label_offset_for_pin ----
+
+    #[test]
+    fn label_offset_left_pin_no_transform() {
+        let off = label_offset_for_pin(PinDirection::Left, 0, false);
+        assert!((off.x - (-30.0)).abs() < 1e-6 && off.y.abs() < 1e-6);
+    }
+
+    #[test]
+    fn label_offset_rotation_90_swaps_axes() {
+        // A "Right" pin (offset (30, 0)) rotated +90° → (0, 30) approximately.
+        let off = label_offset_for_pin(PinDirection::Right, 90, false);
+        assert!(off.x.abs() < 1e-6, "x should be ~0, got {}", off.x);
+        assert!((off.y - 30.0).abs() < 1e-6, "y should be ~30, got {}", off.y);
+    }
+
+    #[test]
+    fn label_offset_mirror_flips_horizontal_axis() {
+        // Right pin mirrored: 30 → -30
+        let off = label_offset_for_pin(PinDirection::Right, 0, true);
+        assert!((off.x - (-30.0)).abs() < 1e-6);
+    }
+
+    // ---- snap_and_dedup ----
+
+    #[test]
+    fn snap_and_dedup_removes_collinear_repeats() {
+        // After snapping to grid 10, all three points are (0,0), (10,0), (10,0) — middle dup'd.
+        let pts = vec![p(0.0, 0.0), p(10.0, 0.0), p(11.0, 0.0)];
+        let cleaned = snap_and_dedup(&pts, 10.0);
+        assert_eq!(cleaned.len(), 2);
+        assert_eq!(cleaned[0], p(0.0, 0.0));
+        assert_eq!(cleaned[1], p(10.0, 0.0));
+    }
+
+    #[test]
+    fn snap_and_dedup_preserves_distinct_points() {
+        let pts = vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)];
+        let cleaned = snap_and_dedup(&pts, 10.0);
+        assert_eq!(cleaned.len(), 3);
+    }
+
+    // ---- segments_cross ----
+
+    #[test]
+    fn segments_cross_interior_only() {
+        // Cross at (5,5): both interior
+        assert!(segments_cross(&p(0.0, 5.0), &p(10.0, 5.0), &p(5.0, 0.0), &p(5.0, 10.0)));
+        // Touch at endpoint: not a cross
+        assert!(!segments_cross(&p(0.0, 0.0), &p(5.0, 0.0), &p(5.0, 0.0), &p(5.0, 10.0)));
+        // Parallel: no cross
+        assert!(!segments_cross(&p(0.0, 0.0), &p(10.0, 0.0), &p(0.0, 5.0), &p(10.0, 5.0)));
+        // Disjoint: no cross
+        assert!(!segments_cross(&p(0.0, 0.0), &p(1.0, 0.0), &p(5.0, 5.0), &p(6.0, 5.0)));
+    }
+
+    // ---- l_route_best ----
+
+    #[test]
+    fn l_route_aligned_points_yields_straight_line() {
+        let route = l_route_best(p(0.0, 0.0), p(10.0, 0.0), &[]);
+        assert_eq!(route, vec![p(0.0, 0.0), p(10.0, 0.0)]);
+    }
+
+    #[test]
+    fn l_route_default_is_horizontal_first() {
+        let route = l_route_best(p(0.0, 0.0), p(10.0, 10.0), &[]);
+        // H-first: corner at (10, 0)
+        assert_eq!(route, vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)]);
+    }
+
+    #[test]
+    fn l_route_picks_v_first_when_h_first_crosses() {
+        // Place an existing horizontal wire that the H-first route would cross at (5,0)
+        // but the V-first route avoids.
+        // From (0,0) to (10,10).
+        // H-first: (0,0) → (10,0) → (10,10). Segment (0,0)-(10,0) along y=0.
+        // V-first: (0,0) → (0,10) → (10,10). Segment (0,10)-(10,10) along y=10.
+        // Existing wire at y=0 from x=2 to x=8 will cross the H-first first segment
+        // ... but it would only touch endpoints. Let's make the obstacle vertical:
+        // existing vertical wire from (5, -5) to (5, 5) crosses the H-first
+        // horizontal segment (0,0)-(10,0) at (5, 0) — interior of both.
+        let obstacle = Wire { points: vec![p(5.0, -5.0), p(5.0, 5.0)] };
+        let route = l_route_best(p(0.0, 0.0), p(10.0, 10.0), &[obstacle]);
+        // Should have picked V-first: (0,0) → (0,10) → (10,10)
+        assert_eq!(route, vec![p(0.0, 0.0), p(0.0, 10.0), p(10.0, 10.0)]);
+    }
+
+    // ---- minimum_spanning_tree ----
+
+    #[test]
+    fn mst_empty_and_singleton() {
+        assert!(minimum_spanning_tree(&[]).is_empty());
+        assert!(minimum_spanning_tree(&[p(0.0, 0.0)]).is_empty());
+    }
+
+    #[test]
+    fn mst_two_points_is_one_edge() {
+        let edges = minimum_spanning_tree(&[p(0.0, 0.0), p(10.0, 0.0)]);
+        assert_eq!(edges, vec![(0, 1)]);
+    }
+
+    #[test]
+    fn mst_chain_picks_shortest_edges() {
+        // Three colinear points: 0 — 10 — 110
+        // MST should be {(0,1), (1,2)} not {(0,1), (0,2)}.
+        let pts = [p(0.0, 0.0), p(10.0, 0.0), p(110.0, 0.0)];
+        let edges = minimum_spanning_tree(&pts);
+        assert_eq!(edges.len(), 2);
+        let mut s: Vec<(usize, usize)> = edges.iter().map(|&(a, b)| {
+            if a < b { (a, b) } else { (b, a) }
+        }).collect();
+        s.sort();
+        assert_eq!(s, vec![(0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn mst_total_length_optimal_on_square() {
+        // 4 corners of a 10x10 square. MST total length = 30 (3 sides), not the
+        // 30 + diagonal that a star from corner 0 would produce (10 + 10 + ~14.14).
+        let pts = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)];
+        let edges = minimum_spanning_tree(&pts);
+        assert_eq!(edges.len(), 3);
+        let total: f64 = edges.iter()
+            .map(|&(a, b)| pts[a].distance_to(&pts[b]))
+            .sum();
+        assert!((total - 30.0).abs() < 1e-6, "MST total = {}", total);
+    }
+}
