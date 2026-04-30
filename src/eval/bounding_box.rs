@@ -99,3 +99,73 @@ pub fn check(schematic: &Schematic) -> BoundingBoxReport {
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Component, Wire, Label, Point as MPoint};
+
+    fn empty() -> Schematic { Schematic::new("") }
+
+    #[test]
+    fn empty_schematic_returns_zero_box() {
+        let r = check(&empty());
+        assert_eq!(r.width, 0.0);
+        assert_eq!(r.height, 0.0);
+        assert_eq!(r.area, 0.0);
+        assert_eq!(r.aspect_ratio, 1.0);
+        assert_eq!(r.component_count, 0);
+    }
+
+    #[test]
+    fn aspect_ratio_is_geq_one_regardless_of_orientation() {
+        // Tall: width 10, height 100 → ratio 10
+        let mut s = empty();
+        s.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(10.0, 100.0)] });
+        let r = check(&s);
+        assert_eq!(r.width, 10.0);
+        assert_eq!(r.height, 100.0);
+        assert_eq!(r.aspect_ratio, 10.0);
+
+        // Wide: width 100, height 10 → ratio also 10 (always max/min)
+        let mut s2 = empty();
+        s2.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(100.0, 10.0)] });
+        let r2 = check(&s2);
+        assert_eq!(r2.aspect_ratio, 10.0);
+    }
+
+    #[test]
+    fn labels_and_wires_expand_bounds() {
+        let mut s = empty();
+        s.labels.push(Label { name: "n".into(), position: MPoint::new(-50.0, 0.0) });
+        s.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(0.0, 100.0)] });
+        let r = check(&s);
+        assert_eq!(r.min_x, -50.0);
+        assert_eq!(r.max_y, 100.0);
+        assert_eq!(r.width, 50.0);
+        assert_eq!(r.height, 100.0);
+    }
+
+    #[test]
+    fn component_count_matches() {
+        let mut s = empty();
+        s.components.push(Component {
+            instance_name: "R1".into(),
+            symbol_name: "resistor".into(),
+            position: MPoint::new(0.0, 0.0),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        });
+        s.components.push(Component {
+            instance_name: "R2".into(),
+            symbol_name: "resistor".into(),
+            position: MPoint::new(100.0, 100.0),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        });
+        let r = check(&s);
+        assert_eq!(r.component_count, 2);
+    }
+}
