@@ -75,3 +75,85 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Component, Point};
+
+    fn comp(name: &str, sym: &str, x: f64, y: f64, props: &[(&str, &str)]) -> Component {
+        Component {
+            instance_name: name.into(),
+            symbol_name: sym.into(),
+            position: Point::new(x, y),
+            rotation: 0,
+            mirrored: false,
+            properties: props.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        }
+    }
+
+    #[test]
+    fn no_components_perfect_score() {
+        let r = check(&Schematic::new(""));
+        assert!(r.matched_pairs.is_empty());
+        assert_eq!(r.overall_score, 1.0);
+    }
+
+    #[test]
+    fn singletons_dont_form_pairs() {
+        // One nmos with W=1u, one pmos with W=1u → different symbol → not a pair.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "1u"), ("L", "1u")]));
+        s.components.push(comp("M2", "pmos4", 100.0, 0.0, &[("W", "1u"), ("L", "1u")]));
+        let r = check(&s);
+        assert!(r.matched_pairs.is_empty());
+    }
+
+    #[test]
+    fn aligned_pair_scores_one() {
+        // Two identical nmos at same y → perfect symmetry.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "nmos4", -50.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp("M2", "nmos4",  50.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        let r = check(&s);
+        assert_eq!(r.matched_pairs.len(), 1);
+        assert_eq!(r.matched_pairs[0].y_diff, 0.0);
+        assert_eq!(r.matched_pairs[0].symmetry_score, 1.0);
+        assert_eq!(r.overall_score, 1.0);
+    }
+
+    #[test]
+    fn misaligned_pair_scores_lower() {
+        // Same x_diff = 100 and y_diff = 100 → max_dim = 100, score = 1 - 100/100 = 0.0
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "nmos4",   0.0,   0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp("M2", "nmos4", 100.0, 100.0, &[("W", "10u"), ("L", "1u")]));
+        let r = check(&s);
+        assert_eq!(r.matched_pairs.len(), 1);
+        assert_eq!(r.matched_pairs[0].y_diff, 100.0);
+        assert!(r.matched_pairs[0].symmetry_score <= 0.01);
+    }
+
+    #[test]
+    fn property_differences_break_pairing() {
+        // Two nmos with different W → not the same key, so no pair.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp("M2", "nmos4", 100.0, 0.0, &[("W", "20u"), ("L", "1u")]));
+        let r = check(&s);
+        assert!(r.matched_pairs.is_empty());
+    }
+
+    #[test]
+    fn group_of_three_is_not_a_pair() {
+        // 3 identical devices → group size != 2 → not scored.
+        let mut s = Schematic::new("");
+        for (i, x) in [-100.0, 0.0, 100.0].iter().enumerate() {
+            s.components.push(comp(&format!("M{}", i + 1), "nmos4", *x, 0.0,
+                &[("W", "10u"), ("L", "1u")]));
+        }
+        let r = check(&s);
+        assert!(r.matched_pairs.is_empty());
+        assert_eq!(r.overall_score, 1.0);
+    }
+}

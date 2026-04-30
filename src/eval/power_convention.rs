@@ -75,3 +75,85 @@ pub fn check(schematic: &Schematic) -> PowerConventionReport {
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Component, Point};
+
+    fn comp(name: &str, sym: &str, x: f64, y: f64) -> Component {
+        Component {
+            instance_name: name.into(),
+            symbol_name: sym.into(),
+            position: Point::new(x, y),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        }
+    }
+
+    #[test]
+    fn no_mosfets_perfect_score() {
+        let r = check(&Schematic::new(""));
+        assert_eq!(r.pmos_count, 0);
+        assert_eq!(r.nmos_count, 0);
+        assert_eq!(r.score, 1.0);
+        assert!(r.violations.is_empty());
+    }
+
+    #[test]
+    fn pmos_above_nmos_in_same_column_is_valid() {
+        // Smaller y means higher on the page. PMOS at y=0, NMOS at y=100.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "pmos4", 0.0, 0.0));
+        s.components.push(comp("M2", "nmos4", 0.0, 100.0));
+        let r = check(&s);
+        assert_eq!(r.pmos_count, 1);
+        assert_eq!(r.nmos_count, 1);
+        assert!(r.violations.is_empty());
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn pmos_below_nmos_in_same_column_violates() {
+        // PMOS at y=100 (lower), NMOS at y=0 (higher) → violation.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "pmos4", 0.0, 100.0));
+        s.components.push(comp("M2", "nmos4", 0.0, 0.0));
+        let r = check(&s);
+        assert_eq!(r.violations.len(), 1);
+        assert_eq!(r.score, 0.0);
+    }
+
+    #[test]
+    fn devices_in_different_columns_are_not_compared() {
+        // x_threshold = 100. Pair separated by 200 → no comparison, no violation.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "pmos4",   0.0, 100.0));
+        s.components.push(comp("M2", "nmos4", 200.0,   0.0));
+        let r = check(&s);
+        assert!(r.violations.is_empty());
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn mixed_compliance_yields_partial_score() {
+        // M1 (pmos top) vs M3 (nmos bottom): valid.
+        // M1 (pmos top) vs M2 (nmos top, in same column): valid (py=0 ≤ ny=0).
+        // M4 (pmos bottom) vs M3 (nmos top): violation (py=100 > ny=0).
+        // → 2 valid + 1 violation across 3 compared pairs in column 0.
+        let mut s = Schematic::new("");
+        s.components.push(comp("M1", "pmos4", 0.0,   0.0));
+        s.components.push(comp("M4", "pmos4", 0.0, 100.0));
+        s.components.push(comp("M2", "nmos4", 0.0,   0.0));
+        s.components.push(comp("M3", "nmos4", 0.0,  50.0));
+        let r = check(&s);
+        // M1 vs M2 (0 ≤ 0): valid
+        // M1 vs M3 (0 ≤ 50): valid
+        // M4 vs M2 (100 > 0): violation
+        // M4 vs M3 (100 > 50): violation
+        assert_eq!(r.violations.len(), 2);
+        // 2 valid out of 4 compared
+        assert_eq!(r.score, 0.5);
+    }
+}

@@ -63,3 +63,68 @@ fn rects_overlap(a: &Rect, b: &Rect) -> bool {
         && a.top() + margin < b.bottom()
         && b.top() + margin < a.bottom()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Component, Point as MPoint};
+
+    fn comp(name: &str, sym: &str, x: f64, y: f64) -> Component {
+        Component {
+            instance_name: name.into(),
+            symbol_name: sym.into(),
+            position: MPoint::new(x, y),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        }
+    }
+
+    #[test]
+    fn rects_overlap_geometry() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        // Strict overlap
+        assert!(rects_overlap(&a, &Rect::new(5.0, 5.0, 10.0, 10.0)));
+        // Disjoint
+        assert!(!rects_overlap(&a, &Rect::new(20.0, 0.0, 10.0, 10.0)));
+        // Just touching at edge — within 1.0 margin → not flagged
+        assert!(!rects_overlap(&a, &Rect::new(10.0, 0.0, 10.0, 10.0)));
+    }
+
+    #[test]
+    fn no_components_yields_no_overlap() {
+        let r = check(&Schematic::new(""));
+        assert_eq!(r.overlap_count, 0);
+        assert!(r.overlapping_pairs.is_empty());
+    }
+
+    #[test]
+    fn far_apart_components_dont_overlap() {
+        let mut s = Schematic::new("");
+        s.components.push(comp("R1", "resistor", 0.0, 0.0));
+        s.components.push(comp("R2", "resistor", 1000.0, 0.0));
+        let r = check(&s);
+        assert_eq!(r.overlap_count, 0);
+    }
+
+    #[test]
+    fn coincident_components_overlap() {
+        let mut s = Schematic::new("");
+        s.components.push(comp("R1", "resistor", 0.0, 0.0));
+        s.components.push(comp("R2", "resistor", 0.0, 0.0));
+        let r = check(&s);
+        assert_eq!(r.overlap_count, 1);
+        let (a, b) = &r.overlapping_pairs[0];
+        assert!((a == "R1" && b == "R2") || (a == "R2" && b == "R1"));
+    }
+
+    #[test]
+    fn unknown_symbol_components_are_skipped() {
+        // Components with unknown symbol_name don't get a bounding rect → no overlap.
+        let mut s = Schematic::new("");
+        s.components.push(comp("X1", "no_such_symbol", 0.0, 0.0));
+        s.components.push(comp("X2", "no_such_symbol", 0.0, 0.0));
+        let r = check(&s);
+        assert_eq!(r.overlap_count, 0);
+    }
+}
