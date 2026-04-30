@@ -69,6 +69,75 @@ fn is_endpoint(pt: &Point, a: &Point, b: &Point) -> bool {
     close(pt, a) || close(pt, b)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Junction, Wire};
+
+    fn schematic_with(wires: Vec<Wire>, junctions: Vec<Junction>) -> Schematic {
+        let mut s = Schematic::new("");
+        s.wires = wires;
+        s.junctions = junctions;
+        s
+    }
+
+    #[test]
+    fn parallel_wires_do_not_cross() {
+        let a = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
+        let b = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
+        let r = check(&schematic_with(vec![a, b], vec![]));
+        assert_eq!(r.crossing_count, 0);
+    }
+
+    #[test]
+    fn perpendicular_interior_crossing_counts_once() {
+        // Horizontal at y=5, vertical at x=5; they cross at (5,5) interior to both.
+        let h = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
+        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let r = check(&schematic_with(vec![h, v], vec![]));
+        assert_eq!(r.crossing_count, 1);
+        let pt = &r.crossings[0].position;
+        assert!((pt.x - 5.0).abs() < 1e-3 && (pt.y - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn endpoint_touches_are_not_crossings() {
+        // Two segments that share an endpoint at (5,0): not a crossing (only interior
+        // intersections count).
+        let a = Wire { points: vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)] };
+        let b = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let r = check(&schematic_with(vec![a, b], vec![]));
+        assert_eq!(r.crossing_count, 0);
+
+        // T-junction (endpoint of one segment lying on the interior of another)
+        // is also not flagged — the strict-interior eps check excludes it.
+        let h = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
+        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let r2 = check(&schematic_with(vec![h, v], vec![]));
+        assert_eq!(r2.crossing_count, 0);
+    }
+
+    #[test]
+    fn registered_junction_is_excluded() {
+        let h = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
+        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let j = Junction { position: Point::new(5.0, 5.0) };
+        let r = check(&schematic_with(vec![h, v], vec![j]));
+        assert_eq!(r.crossing_count, 0);
+    }
+
+    #[test]
+    fn segments_within_same_wire_dont_count() {
+        // A polyline that self-touches must not be counted (same wire index).
+        let w = Wire { points: vec![
+            Point::new(0.0, 0.0), Point::new(10.0, 0.0),
+            Point::new(10.0, 10.0), Point::new(0.0, 10.0),
+        ] };
+        let r = check(&schematic_with(vec![w], vec![]));
+        assert_eq!(r.crossing_count, 0);
+    }
+}
+
 /// Test if two line segments intersect, return the intersection point if they do.
 /// Uses the standard cross-product method.
 fn segment_intersection(p1: &Point, p2: &Point, p3: &Point, p4: &Point) -> Option<Point> {
