@@ -157,3 +157,82 @@ pub fn check(parse_result: &ParseResult, schematic: &Schematic) -> ConnectivityR
 fn close_enough(a: &Point, b: &Point) -> bool {
     (a.x - b.x).abs() < 2.0 && (a.y - b.y).abs() < 2.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Label, PowerSymbol, PowerType};
+    use crate::parser::SpiceParser;
+
+    fn parse(spice: &str) -> ParseResult {
+        SpiceParser::new().parse(spice)
+    }
+
+    #[test]
+    fn empty_inputs_yield_consistent_report() {
+        let pr = parse("* nothing\n");
+        let s = Schematic::new("");
+        let r = check(&pr, &s);
+        assert_eq!(r.expected_net_count, 0);
+        assert_eq!(r.found_net_count, 0);
+        assert!(r.all_nets_connected);
+        assert!(r.missing_connections.is_empty());
+        assert!(r.orphan_labels.is_empty());
+        assert_eq!(r.duplicate_label_positions, 0);
+    }
+
+    #[test]
+    fn label_appearing_once_is_orphan() {
+        let pr = parse("* one\nR1 a b 1k\n");
+        let mut s = Schematic::new("");
+        s.labels.push(Label { name: "lonely".into(), position: Point::new(0.0, 0.0) });
+        let r = check(&pr, &s);
+        assert!(r.orphan_labels.contains(&"lonely".to_string()));
+    }
+
+    #[test]
+    fn label_appearing_twice_is_not_orphan() {
+        let pr = parse("* two\nR1 a b 1k\nR2 b c 1k\n");
+        let mut s = Schematic::new("");
+        s.labels.push(Label { name: "b".into(), position: Point::new(0.0, 0.0) });
+        s.labels.push(Label { name: "b".into(), position: Point::new(100.0, 0.0) });
+        let r = check(&pr, &s);
+        assert!(!r.orphan_labels.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn duplicate_label_positions_are_counted() {
+        // Same name AND ~same position counts as one duplicate pair.
+        let pr = parse("* two\nR1 a b 1k\n");
+        let mut s = Schematic::new("");
+        s.labels.push(Label { name: "n".into(), position: Point::new(50.0, 50.0) });
+        s.labels.push(Label { name: "n".into(), position: Point::new(50.5, 50.0) }); // close
+        s.labels.push(Label { name: "n".into(), position: Point::new(500.0, 0.0) });  // far
+        let r = check(&pr, &s);
+        assert_eq!(r.duplicate_label_positions, 1);
+    }
+
+    #[test]
+    fn found_net_count_aggregates_labels_and_power() {
+        let pr = parse("* mixed\nR1 a b 1k\n");
+        let mut s = Schematic::new("");
+        s.labels.push(Label { name: "a".into(), position: Point::new(0.0, 0.0) });
+        s.labels.push(Label { name: "b".into(), position: Point::new(50.0, 0.0) });
+        s.power_symbols.push(PowerSymbol {
+            power_type: PowerType::GND,
+            net_name: "0".into(),
+            position: Point::new(0.0, 50.0),
+        });
+        let r = check(&pr, &s);
+        assert_eq!(r.found_net_count, 3); // 2 unique label names + 1 power symbol
+    }
+
+    #[test]
+    fn expected_net_count_from_netlist() {
+        // R1 a b: nets {a, b}. R2 b c: nets {b, c}. → unique {a, b, c} = 3.
+        let pr = parse("* chain\nR1 a b 1k\nR2 b c 1k\n");
+        let s = Schematic::new("");
+        let r = check(&pr, &s);
+        assert_eq!(r.expected_net_count, 3);
+    }
+}
