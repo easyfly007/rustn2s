@@ -6,11 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `n2s` (Netlist to Schematic) is a Rust tool/library that converts SPICE netlists into visual schematics (SVG, JSON, KiCad `.kicad_sch`). It is a Rust reimplementation of the N2S pipeline from the C++ MySchematic project, with no Qt or other GUI dependency.
 
-## Workflow
-
-- **Start every session with `git pull`** before doing any work, so you're on top of the latest `main`.
-- **Commit early and often.** As soon as a change reaches a stable point — `cargo build` succeeds and basic tests (`cargo test`) pass — commit it and `git push` to GitHub. Do not batch many unrelated changes into one giant commit; prefer a stream of small, focused commits over a single end-of-task megacommit. The user has authorized this commit-and-push cadence in advance for this repo.
-
 ## Common Commands
 
 ```bash
