@@ -109,7 +109,7 @@ SPICE file
 | `model` | Geometry primitives, symbol definitions, schematic data structures |
 | `export` | SVG renderer (dark theme), JSON serializer, and KiCad `.kicad_sch` exporter |
 
-See [docs/architecture.md](docs/architecture.md) for detailed design documentation.
+See [docs/architecture.md](docs/architecture.md) for detailed design documentation, and [docs/learning_resources.md](docs/learning_resources.md) for a curated reading list (algorithms, papers, open-source projects, courses) to study netlist-to-schematic systematically.
 
 ## Evaluating Schematic Quality
 
