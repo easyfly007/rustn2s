@@ -424,3 +424,73 @@ pub mod builtin_symbols {
         syms.into_iter().map(|s| (s.name.clone(), s)).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::builtin_symbols;
+
+    #[test]
+    fn all_returns_14_named_symbols() {
+        let map = builtin_symbols::all();
+        assert_eq!(map.len(), 14);
+        for name in [
+            "nmos4", "pmos4", "resistor", "capacitor", "inductor", "diode",
+            "npn", "pnp", "vsource", "isource", "vcvs", "vccs", "ccvs", "cccs",
+        ] {
+            assert!(map.contains_key(name), "missing builtin symbol: {}", name);
+            // Each symbol's stored name matches its key
+            assert_eq!(map[name].name, name);
+        }
+    }
+
+    #[test]
+    fn mosfet_pin_names_are_dgsb() {
+        let nmos = builtin_symbols::create_nmos4();
+        let names: Vec<&str> = nmos.pins.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["G", "D", "S", "B"]);
+
+        // BJT shape: B/C/E
+        let npn = builtin_symbols::all().get("npn").cloned().unwrap();
+        let bjt_names: Vec<&str> = npn.pins.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(bjt_names.len(), 3);
+    }
+
+    #[test]
+    fn bounding_rect_covers_all_pins_and_graphics() {
+        let r = builtin_symbols::create_nmos4().bounding_rect();
+        // Pins are at x ∈ {-30, 0, 10}, y ∈ {-20, 0, 20}
+        assert!(r.left() <= -30.0);
+        assert!(r.right() >= 10.0);
+        assert!(r.top() <= -20.0);
+        assert!(r.bottom() >= 20.0);
+    }
+
+    #[test]
+    fn empty_symbol_bounding_rect_is_zero() {
+        let empty = SymbolDef { name: "x".into(), pins: vec![], graphics: vec![] };
+        let r = empty.bounding_rect();
+        assert_eq!(r.width, 0.0);
+        assert_eq!(r.height, 0.0);
+    }
+
+    #[test]
+    fn subcircuit_symbol_has_one_pin_per_port() {
+        let ports: Vec<String> = ["A", "B", "C", "D", "E"].iter().map(|s| s.to_string()).collect();
+        let sym = builtin_symbols::create_subcircuit_symbol("OPAMP", &ports);
+
+        assert_eq!(sym.name, "subckt_OPAMP");
+        assert_eq!(sym.pins.len(), 5);
+
+        // Pin names preserve input order
+        let names: Vec<&str> = sym.pins.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["A", "B", "C", "D", "E"]);
+
+        // Pins split between left (first half, ceil) and right
+        // n=5 → left_count = 3 (Left), right_count = 2 (Right)
+        let left = sym.pins.iter().filter(|p| p.direction == PinDirection::Left).count();
+        let right = sym.pins.iter().filter(|p| p.direction == PinDirection::Right).count();
+        assert_eq!(left, 3);
+        assert_eq!(right, 2);
+    }
+}
