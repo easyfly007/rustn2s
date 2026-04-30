@@ -119,6 +119,22 @@ fn export_json_round_trip() {
 }
 
 #[test]
+fn export_kicad_writes_kicad_sch_envelope() {
+    use n2s::export::kicad;
+    use std::collections::HashMap;
+    let s = run_pipeline(&read_example("01_voltage_divider.sp"));
+    let tmp = std::env::temp_dir().join("n2s_test_voltage_divider.kicad_sch");
+    let extra: HashMap<String, n2s::model::SymbolDef> = HashMap::new();
+    kicad::render_to_file(&s, tmp.to_str().unwrap(), &extra).expect("render_to_file");
+    let body = std::fs::read_to_string(&tmp).expect("read back");
+    // KiCad files are S-expressions; the top form must be (kicad_sch ...).
+    assert!(body.trim_start().starts_with("(kicad_sch"),
+        "expected (kicad_sch top-level form, got: {}",
+        &body[..50.min(body.len())]);
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[test]
 fn export_svg_writes_well_formed_xml() {
     use n2s::export::svg;
     let s = run_pipeline(&read_example("01_voltage_divider.sp"));
