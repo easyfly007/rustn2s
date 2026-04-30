@@ -76,3 +76,71 @@ impl Rect {
     pub fn right(&self) -> f64 { self.x + self.width }
     pub fn bottom(&self) -> f64 { self.y + self.height }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn distance_to_is_euclidean() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(3.0, 4.0);
+        assert!(approx(a.distance_to(&b), 5.0));
+    }
+
+    #[test]
+    fn transform_zero_rotation_is_identity() {
+        let p = Point::new(7.0, -2.0);
+        let q = p.transform(0, false);
+        assert!(approx(p.x, q.x) && approx(p.y, q.y));
+    }
+
+    #[test]
+    fn transform_mirror_flips_x() {
+        let p = Point::new(5.0, 3.0).transform(0, true);
+        assert!(approx(p.x, -5.0) && approx(p.y, 3.0));
+    }
+
+    #[test]
+    fn transform_90_rotates_ccw() {
+        // Standard math convention: (1,0) rotated +90° → (0,1)
+        let p = Point::new(1.0, 0.0).transform(90, false);
+        assert!(approx(p.x, 0.0) && approx(p.y, 1.0));
+    }
+
+    #[test]
+    fn snap_to_grid_rounds_to_nearest() {
+        let p = Point::new(13.0, -27.0).snap_to_grid(10.0);
+        assert!(approx(p.x, 10.0) && approx(p.y, -30.0));
+    }
+
+    #[test]
+    fn snap_to_grid_zero_or_negative_is_passthrough() {
+        let p = Point::new(13.0, -27.0);
+        let q = p.snap_to_grid(0.0);
+        assert!(approx(p.x, q.x) && approx(p.y, q.y));
+        let r = p.snap_to_grid(-5.0);
+        assert!(approx(p.x, r.x) && approx(p.y, r.y));
+    }
+
+    #[test]
+    fn point_addition() {
+        let s = Point::new(1.0, 2.0) + Point::new(3.0, 5.0);
+        assert!(approx(s.x, 4.0) && approx(s.y, 7.0));
+    }
+
+    #[test]
+    fn rect_from_points_uses_min_max() {
+        let r = Rect::from_points(Point::new(1.0, 2.0), Point::new(4.0, 7.0));
+        assert!(approx(r.left(), 1.0));
+        assert!(approx(r.top(), 2.0));
+        assert!(approx(r.right(), 4.0));
+        assert!(approx(r.bottom(), 7.0));
+        assert!(approx(r.width, 3.0));
+        assert!(approx(r.height, 5.0));
+    }
+}
