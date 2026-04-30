@@ -836,3 +836,135 @@ impl SchematicPlacer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::{CircuitAnalyzer, ClusterOptions};
+    use crate::parser::SpiceParser;
+
+    fn parse_devices(spice: &str) -> Vec<SpiceDevice> {
+        SpiceParser::new().parse(spice).devices
+    }
+
+    #[test]
+    fn symbol_for_device_maps_passive_letters() {
+        let devices = parse_devices(
+            "* mix\n\
+             R1 a b 1k\n\
+             C1 a b 1u\n\
+             L1 a b 1m\n\
+             D1 a b dmod\n",
+        );
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[0]), "resistor");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[1]), "capacitor");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[2]), "inductor");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[3]), "diode");
+    }
+
+    #[test]
+    fn symbol_for_device_distinguishes_nmos_pmos() {
+        let devices = parse_devices(
+            "* MOS\n\
+             M1 d g s b nch W=1u L=1u\n\
+             M2 d g s b pch W=1u L=1u\n",
+        );
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[0]), "nmos4");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[1]), "pmos4");
+    }
+
+    #[test]
+    fn symbol_for_device_handles_controlled_sources() {
+        let devices = parse_devices(
+            "* controlled\n\
+             E1 o 0 a b 2\n\
+             G1 o 0 a b 1m\n\
+             H1 o 0 V1 500\n\
+             F1 o 0 V1 10\n\
+             V1 a b 0\n",
+        );
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[0]), "vcvs");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[1]), "vccs");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[2]), "ccvs");
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[3]), "cccs");
+    }
+
+    #[test]
+    fn symbol_for_device_subcircuit_uses_model_name() {
+        let devices = parse_devices(
+            "* subckt\n\
+             X1 a b VDD VSS INV\n",
+        );
+        assert_eq!(SchematicPlacer::symbol_for_device(&devices[0]), "subckt_INV");
+    }
+
+    #[test]
+    fn place_empty_blocks_returns_empty_result() {
+        let placer = SchematicPlacer;
+        let r = placer.place(&[], &HashSet::new(), &PlacerOptions::default());
+        assert!(r.placements.is_empty());
+    }
+
+    #[test]
+    fn place_inverter_yields_two_placements_with_pmos_above_nmos() {
+        // Phase 2.3 invariant: PMOS sits above NMOS.
+        // Note: the Inverter template stores symbol_name="" — the router
+        // resolves it later via symbol_for_device. So look up by device_index.
+        let pr = SpiceParser::new().parse(
+            "* CMOS Inverter\n\
+             M1 out in vdd vdd pch W=20u L=1u\n\
+             M2 out in 0 0 nch W=10u L=1u\n",
+        );
+        let analyzer = CircuitAnalyzer::new();
+        let power_nets = analyzer.identify_power_nets(&pr.devices);
+        let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
+
+        let placer = SchematicPlacer;
+        let result = placer.place_with_devices(
+            &blocks, &power_nets, &PlacerOptions::default(), &pr.devices,
+        );
+        assert_eq!(result.placements.len(), 2);
+
+        let mut pmos_y = None;
+        let mut nmos_y = None;
+        for dp in &result.placements {
+            let sym = if dp.symbol_name.is_empty() {
+                SchematicPlacer::symbol_for_device(&pr.devices[dp.device_index])
+            } else {
+                dp.symbol_name.clone()
+            };
+            match sym.as_str() {
+                "pmos4" => pmos_y = Some(dp.position.y),
+                "nmos4" => nmos_y = Some(dp.position.y),
+                _ => {}
+            }
+        }
+        let pmos_y = pmos_y.expect("PMOS missing");
+        let nmos_y = nmos_y.expect("NMOS missing");
+        assert!(pmos_y < nmos_y,
+            "PMOS y ({}) should be < NMOS y ({})", pmos_y, nmos_y);
+    }
+
+    #[test]
+    fn place_snaps_to_grid() {
+        let pr = SpiceParser::new().parse(
+            "* RC\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1u\n",
+        );
+        let analyzer = CircuitAnalyzer::new();
+        let power_nets = analyzer.identify_power_nets(&pr.devices);
+        let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
+
+        let opts = PlacerOptions { grid_size: 10.0, ..Default::default() };
+        let placer = SchematicPlacer;
+        let result = placer.place_with_devices(&blocks, &power_nets, &opts, &pr.devices);
+        for dp in &result.placements {
+            assert_eq!(dp.position.x, (dp.position.x / 10.0).round() * 10.0,
+                "x not on grid: {}", dp.position.x);
+            assert_eq!(dp.position.y, (dp.position.y / 10.0).round() * 10.0,
+                "y not on grid: {}", dp.position.y);
+        }
+    }
+}
