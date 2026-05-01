@@ -804,6 +804,37 @@ impl SchematicPlacer {
                     keys.push(key);
                 }
 
+                // Reorder keys so PMOS-only groups come first (top of the
+                // block), then passives / mixed, then NMOS-only groups
+                // (bottom). This is the within-block analogue of
+                // sort_blocks_by_polarity (Phase 2.3) and fixes Bug 1 in
+                // the 2026-05-01 expansion findings: when HAC clusters a
+                // common-source amp's NMOS and PMOS into the same Unknown
+                // block (circuit 13_pdk_mos_model_names), the original
+                // device-order placed NMOS above PMOS, violating the
+                // PMOS-above-NMOS convention. Stable-sort on the polarity
+                // class preserves the original key order within each
+                // class.
+                let polarity_of_key = |key: &String| -> u8 {
+                    let mut has_p = false;
+                    let mut has_n = false;
+                    for &di in &key_groups[key] {
+                        if di >= all_devices.len() { continue; }
+                        let sym = Self::symbol_for_device(&all_devices[di]);
+                        match sym.as_str() {
+                            "pmos4" | "pnp" => has_p = true,
+                            "nmos4" | "npn" => has_n = true,
+                            _ => {}
+                        }
+                    }
+                    match (has_p, has_n) {
+                        (true, false) => 0,
+                        (false, true) => 2,
+                        _ => 1,
+                    }
+                };
+                order.sort_by_key(|k| polarity_of_key(k));
+
                 let mut placements = Vec::new();
                 let mut y = 0.0;
                 let mut max_width: f64 = 60.0;
