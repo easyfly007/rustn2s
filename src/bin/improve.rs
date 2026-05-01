@@ -49,6 +49,11 @@ struct Cli {
     #[arg(long, default_value_t = 300.0)]
     label_threshold: f64,
 
+    /// Initial adaptive label-threshold ratio (router knob;
+    /// effective threshold = max(label_threshold, bbox_diagonal × this)).
+    #[arg(long, default_value_t = 0.3)]
+    adaptive_label_ratio: f64,
+
     /// Disable pattern recognition
     #[arg(long)]
     no_patterns: bool,
@@ -89,6 +94,10 @@ struct TunableParams {
     block_spacing: f64,
     device_spacing: f64,
     label_threshold: f64,
+    /// Adaptive label-threshold ratio (router knob). 0.0 means use the
+    /// absolute label_threshold only; higher values raise the effective
+    /// threshold for larger schematics so more nets stay as wires.
+    adaptive_label_ratio: f64,
 }
 
 /// Record of a single iteration.
@@ -152,6 +161,7 @@ fn build_opts(params: &TunableParams, cli: &Cli) -> ConvertOptions {
         router: n2s::router::RouterOptions {
             long_net_threshold: params.label_threshold,
             grid_size: cli.grid,
+            adaptive_label_ratio: params.adaptive_label_ratio,
             ..Default::default()
         },
         cluster: n2s::analyzer::ClusterOptions {
@@ -305,26 +315,28 @@ fn generate_starting_points(initial: &TunableParams, n: usize) -> Vec<TunablePar
     let mut points = Vec::with_capacity(n);
     points.push(initial.clone());
 
-    // Eight pre-baked corners + diagonals covering low/medium/high values
-    // of the four parameters. Order is deterministic so reruns are stable.
-    // Each tuple is (layer, block, device, label_threshold).
-    const PRESETS: &[(f64, f64, f64, f64)] = &[
-        (300.0, 100.0,  60.0,  450.0),  // wider columns, smaller devices
-        (100.0, 200.0, 100.0,  600.0),  // narrow columns, taller blocks
-        (400.0, 150.0,  80.0,  300.0),  // big horizontal spread
-        (200.0,  60.0,  50.0,  900.0),  // tight blocks, prefer wires over labels
-        (150.0, 250.0,  60.0,  300.0),  // narrow + tall blocks
-        (500.0, 100.0,  80.0, 1200.0),  // very wide, long-wire preference
-        (250.0, 120.0, 100.0,  500.0),  // medium-everything alt
-        (100.0, 100.0,  60.0,  300.0),  // compact in every dimension
+    // Each preset is (layer, block, device, label_threshold,
+    // adaptive_label_ratio). The adaptive ratio is co-tuned with
+    // label_threshold so search can pick "absolute-only" vs "scaled by
+    // bbox" regimes per circuit.
+    const PRESETS: &[(f64, f64, f64, f64, f64)] = &[
+        (300.0, 100.0,  60.0,  450.0, 0.30),  // wider columns, smaller devices, default ratio
+        (100.0, 200.0, 100.0,  600.0, 0.50),  // narrow columns, more wire-friendly
+        (400.0, 150.0,  80.0,  300.0, 0.60),  // big spread, aggressive wire preference
+        (200.0,  60.0,  50.0,  900.0, 0.00),  // tight blocks, absolute threshold only
+        (150.0, 250.0,  60.0,  300.0, 0.40),  // narrow + tall blocks
+        (500.0, 100.0,  80.0, 1200.0, 0.30),  // very wide
+        (250.0, 120.0, 100.0,  500.0, 0.50),  // medium-everything alt
+        (100.0, 100.0,  60.0,  300.0, 0.30),  // compact in every dimension
     ];
 
-    for &(ls, bs, ds, lt) in PRESETS.iter().take(n.saturating_sub(1)) {
+    for &(ls, bs, ds, lt, ar) in PRESETS.iter().take(n.saturating_sub(1)) {
         points.push(TunableParams {
             layer_spacing: ls,
             block_spacing: bs,
             device_spacing: ds,
             label_threshold: lt,
+            adaptive_label_ratio: ar,
         });
     }
     // If user asked for more restarts than presets, repeat the last preset
@@ -337,6 +349,8 @@ fn generate_starting_points(initial: &TunableParams, n: usize) -> Vec<TunablePar
             block_spacing:  (last.block_spacing  * (1.0 + 0.05 * (i % 5.0 - 2.0))).clamp(30.0, 500.0),
             device_spacing: (last.device_spacing * (1.0 + 0.05 * (i % 4.0 - 1.5))).clamp(30.0, 300.0),
             label_threshold:(last.label_threshold* (1.0 + 0.05 * (i % 7.0 - 3.0))).clamp(100.0, 2000.0),
+            adaptive_label_ratio: (last.adaptive_label_ratio + 0.1 * ((i % 6.0) - 3.0) / 3.0)
+                .clamp(0.0, 0.8),
         });
     }
 
@@ -359,6 +373,7 @@ fn main() {
         block_spacing: cli.block_spacing,
         device_spacing: cli.device_spacing,
         label_threshold: cli.label_threshold,
+        adaptive_label_ratio: cli.adaptive_label_ratio,
     };
 
     let starting_points = if cli.search {

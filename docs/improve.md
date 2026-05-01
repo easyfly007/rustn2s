@@ -84,6 +84,30 @@ Options:
       --search-restarts <N>  Restart count when --search is on [default: 8]
 ```
 
+### Adaptive Label Threshold (router knob)
+
+`RouterOptions::adaptive_label_ratio` (default `0.3`, exposed by both
+`n2s` and `n2s-improve` as `--adaptive-label-ratio`) raises the
+wire-vs-label cutoff for large schematics:
+
+```
+effective_long_net_threshold = max(long_net_threshold, bbox_diagonal × ratio)
+```
+
+The absolute `long_net_threshold` (default `300`) acts as a floor —
+small circuits whose `bbox_diagonal × ratio < 300` see no change, so
+01–06, 09, 11 are unaffected. For 07 (diag ≈ 1248) the effective
+threshold rises to ~374, allowing a few mid-distance nets to stay as
+wires instead of becoming labels.
+
+In score terms the trade-off is roughly **zero-sum**: raising the ratio
+removes labels (label_ratio sub-score up) but creates longer wires
+(wire_length sub-score down), so per-circuit overall score moves <0.01
+across `ratio ∈ [0.0, 0.5]`. The visual benefit on large schematics
+(fewer floating labels, more direct wires) is real and not fully
+captured by the eval metrics. The ratio is included in `TunableParams`
+so `--search` can pick a per-circuit value.
+
 ### Multi-Start Search (`--search`)
 
 Without `--search`, `n2s-improve` runs **one** greedy advice-driven loop
