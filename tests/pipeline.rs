@@ -219,6 +219,66 @@ fn obstacle_avoidance_keeps_wires_off_component_bodies() {
 }
 
 #[test]
+fn improve_search_runs_multiple_restarts_when_target_unreachable() {
+    // Drive n2s-improve at a target score that example 03 (halfwave
+    // rectifier) cannot hit (it's a 4-device linear circuit, capped well
+    // below 0.95 by aspect-ratio inherent limits). With --search, the
+    // tool should run the configured number of restarts and pick the
+    // best across them.
+    let bin = env!("CARGO_BIN_EXE_n2s-improve");
+    let out = std::process::Command::new(bin)
+        .args([
+            "tests/examples/03_halfwave_rectifier.sp",
+            "--search", "--search-restarts", "3",
+            "--max-iter", "3",
+            "--target-score", "0.99",
+            "--quiet",
+        ])
+        .output()
+        .expect("invoke n2s-improve");
+    assert!(out.status.success(),
+        "n2s-improve failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .expect("stdout should be valid JSON");
+    assert_eq!(report["restarts"], 3, "expected 3 restarts, got {}", report["restarts"]);
+    let summaries = report["restart_summary"].as_array().unwrap();
+    assert_eq!(summaries.len(), 3);
+    // Each restart records its starting params + best score
+    for s in summaries {
+        assert!(s["initial_params"].is_object());
+        assert!(s["best_score"].is_number());
+        assert!(s["iterations"].is_number());
+    }
+    // Final score is the best across all restarts
+    let final_score = report["final_score"].as_f64().unwrap();
+    let max_per_restart = summaries.iter()
+        .map(|s| s["best_score"].as_f64().unwrap())
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!((final_score - max_per_restart).abs() < 1e-3,
+        "final_score {} should match max across restarts {}",
+        final_score, max_per_restart);
+}
+
+#[test]
+fn improve_without_search_runs_a_single_restart() {
+    let bin = env!("CARGO_BIN_EXE_n2s-improve");
+    let out = std::process::Command::new(bin)
+        .args([
+            "tests/examples/03_halfwave_rectifier.sp",
+            "--max-iter", "3",
+            "--target-score", "0.99",
+            "--quiet",
+        ])
+        .output()
+        .expect("invoke n2s-improve");
+    assert!(out.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["restarts"], 1);
+    assert_eq!(report["restart_summary"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn export_kicad_writes_kicad_sch_envelope() {
     use n2s::export::kicad;
     use std::collections::HashMap;

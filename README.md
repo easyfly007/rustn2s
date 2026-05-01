@@ -237,6 +237,9 @@ n2s-improve circuit.sp -o circuit.svg --target-score 0.95 --max-iter 20
 
 # Extract optimized parameters for use with n2s directly
 n2s-improve circuit.sp --quiet | jq '.best_params'
+
+# Multi-start search across spaced parameter sets (keeps best)
+n2s-improve circuit.sp --search -o circuit.svg
 ```
 
 ### Options
@@ -247,7 +250,7 @@ n2s-improve <INPUT> [OPTIONS]
 Options:
   -o, --output <FILE>        Output SVG file (best result)
       --json <FILE>          Output JSON schematic file (best result)
-      --max-iter <N>         Maximum iterations [default: 10]
+      --max-iter <N>         Maximum iterations per restart [default: 10]
       --target-score <F>     Target quality score [default: 0.9]
       --layer-spacing <F>    Initial layer spacing [default: 200]
       --block-spacing <F>    Initial block spacing [default: 100]
@@ -255,6 +258,9 @@ Options:
       --label-threshold <F>  Initial label threshold [default: 300]
       --pretty               Pretty-print the JSON report
       --quiet                Suppress iteration logs
+      --search               Multi-restart search (keeps global best)
+      --search-restarts <N>  Number of restarts when --search is on
+                             [default: 8]
 ```
 
 See [docs/improve.md](docs/improve.md) for detailed scoring system, tuning rules, and benchmark results.

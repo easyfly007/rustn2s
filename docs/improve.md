@@ -79,7 +79,48 @@ Options:
       --no-grid              Hide grid in SVG
       --pretty               Pretty-print the JSON report
       --quiet                Suppress iteration logs (only output final report)
+      --search               Run multiple restarts from spaced starting
+                             points and keep the global best (Phase 4.4)
+      --search-restarts <N>  Restart count when --search is on [default: 8]
 ```
+
+### Multi-Start Search (`--search`)
+
+Without `--search`, `n2s-improve` runs **one** greedy advice-driven loop
+from the user-supplied initial parameters. The advisor (`suggest_tuning`
+in `src/eval/score.rs`) only nudges parameters in one direction at a
+time, so circuits with poor initial geometry can converge to a local
+optimum well below their best achievable score.
+
+`--search` runs the same greedy loop from multiple starting points and
+keeps the global best:
+
+1. Restart 0 always uses the user-supplied parameters (so `--search`
+   never under-performs the no-`--search` run).
+2. Restarts 1..N cover deterministic spaced points in parameter space
+   (corners + diagonals: wide/narrow columns, tight/loose blocks,
+   wire-preferring vs. label-preferring thresholds).
+3. As soon as any restart hits `--target-score`, the rest are skipped.
+
+Each restart still respects `--max-iter`, so total work is bounded by
+`max_iter × search_restarts` pipeline runs.
+
+#### Example results
+
+Compared with the single-greedy run on the 11 test circuits:
+
+| Example | Default | `--search` | Δ |
+|---------|:---:|:---:|:---:|
+| 02 RC filter | 0.860 | **0.876** | **+0.016** |
+| 03 halfwave rectifier | 0.844 | **0.860** | **+0.016** |
+| 08 bandgap reference | 0.875 | **0.950** | **+0.075** |
+| All others | unchanged | unchanged | — |
+
+Circuits already at or near the target score finish in restart 0 and
+incur no extra cost. Small linear circuits (02, 03) gain a few points
+because the search reaches a parameter region the advisor wouldn't.
+Bandgap (08) gains the most because its ideal layout uses very
+different spacings from the defaults.
 
 ### Iteration Logs
 

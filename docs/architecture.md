@@ -554,8 +554,42 @@ The op-amp topologies benefit most because they have well-defined signal chains 
 
 Five circuits improved on the median; no regressions. Gains come from the `label_ratio` sub-score — the offset labels and stub wires count as shorter overall label-to-pin distances, and Phase 4.3 also allowed deduplication (one label per pin anchor) to operate on the offset position rather than the raw pin.
 
-#### Phase 4.4 — Remaining Features (TODO)
+#### Phase 4.4 — Multi-Start Parameter Search (DONE)
 
-| Feature | Description |
-|---------|-------------|
-| **Interactive parameter search** | `n2s-improve` tries multiple parameter combinations and picks the best score |
+**Problem:** The single greedy advice loop in `n2s-improve` only nudges
+parameters in one direction at a time. Circuits with poor initial
+geometry can converge to local optima well below their best achievable
+score (notably 02 RC filter, 03 halfwave rectifier, and 08 bandgap).
+
+**Solution:** Added `--search` to `n2s-improve` (`src/bin/improve.rs`).
+It runs the existing greedy loop from multiple deterministic starting
+points and keeps the global best:
+
+1. Restart 0 always uses the user-supplied parameters, so `--search` can
+   never under-perform the no-`--search` baseline.
+2. Restarts 1..N come from `generate_starting_points()` — eight
+   pre-baked corners of the parameter space (wide vs narrow columns,
+   tight vs loose blocks, label-preferring vs wire-preferring
+   thresholds), with deterministic perturbation past N=8.
+3. As soon as any restart hits `--target-score`, the rest are skipped.
+
+The CLI exposes `--search` (off by default) and `--search-restarts <N>`
+(default 8).
+
+**Results after Phase 4.4:**
+
+| Example | Before 4.4 | After 4.4 (`--search`) | Δ |
+|---------|:---:|:---:|:---:|
+| **02 RC filter** | 0.860 | **0.876** | **+0.016** |
+| **03 halfwave rectifier** | 0.844 | **0.860** | **+0.016** |
+| **08 bandgap** | 0.875 | **0.950** | **+0.075** |
+| All others | unchanged | unchanged | — |
+
+08 jumps the most because its ideal geometry uses very different
+spacings from the defaults — restart 0 (defaults) gets stuck around
+0.875, but one of the spaced presets reaches 0.95 directly. Circuits
+already at or near target finish in restart 0 with no extra cost.
+
+Two integration tests in `tests/pipeline.rs` lock the behavior:
+`improve_search_runs_multiple_restarts_when_target_unreachable` and
+`improve_without_search_runs_a_single_restart`.
