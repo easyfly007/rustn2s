@@ -6,6 +6,8 @@ use crate::model::{
     SymbolDef, PinDirection, builtin_symbols,
 };
 
+mod astar;
+
 /// A pin's world-space position plus the outward offset to apply when placing
 /// a label at that pin so the label does not overlap the component graphic.
 #[derive(Clone, Copy)]
