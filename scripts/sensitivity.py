@@ -94,6 +94,16 @@ def rank_with(weights, subs_per_circuit):
     return sorted_scores, ranks
 
 def main(eval_dir):
+    # Auto-discover any *_eval.json the user has generated, so the same
+    # script works whether the test set is 11 or 25 or more.
+    found = sorted(
+        f[:-len("_eval.json")] for f in os.listdir(eval_dir)
+        if f.endswith("_eval.json")
+    )
+    if found:
+        CIRCUITS.clear()
+        CIRCUITS.extend(found)
+
     subs_per_circuit = {}
     for c in CIRCUITS:
         path = os.path.join(eval_dir, f"{c}_eval.json")

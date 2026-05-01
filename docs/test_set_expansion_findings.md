@@ -1,0 +1,257 @@
+# Test Set Expansion: Findings (2026-05-01)
+
+Summary of the bugs and surprises uncovered when expanding the test
+suite from 11 to 25 circuits, in response to the
+[overfitting audit](overfitting_audit.md). The expansion was driven by
+the audit's diagnosis that the original 11 circuits saturated three of
+seven score sub-dimensions and didn't exercise several of the audit's
+predicted blind spots.
+
+The results justify the expansion ten times over — adding 14 circuits
+revealed **four real bugs** (three in shipped algorithms, one in lib.rs's
+default mode) and **two evaluator gaps**. None of these were visible
+under the original suite.
+
+## Bugs uncovered
+
+### Bug 1 — PMOS-below-NMOS sort fails across DAG layers (affects Phase 2.3)
+
+**Circuit**: `13_pdk_mos_model_names.sp`
+
+`sort_blocks_by_polarity()` (Phase 2.3) reorders blocks **within a
+single DAG layer** so PMOS-only blocks come above NMOS-only blocks.
+But when a matched MOSFET pair is split across layers — because the
+analyzer puts them in different functional blocks — the within-layer
+sort can't help. In 13, M1 (NMOS, layer 1) ends up at y=140 and M2
+(PMOS, layer 2) ends up at y=220, putting PMOS *below* NMOS, the
+opposite of the convention.
+
+**Score impact**: `power_convention=0.0` (vs. 1.0 on every original
+test circuit). Lowers overall score from 1.000 to 0.900.
+
+**Severity**: medium — only affects circuits where PMOS and NMOS go
+to different DAG layers, which happens in real designs but didn't
+appear in the original suite.
+
+### Bug 2 — Multiple isolated sources collapse to the same position (affects Phase 2.4)
+
+**Circuit**: `14_disconnected_filters.sp`
+
+`fix_isolated_source_layers()` (Phase 2.4) places blocks with no DAG
+edges at the same layer as the non-isolated block sharing the most
+nets. When two isolated sources both have **zero shared nets** with
+anything, they both fall back to the same default position — V1 and
+V2 end up at identical (x, y).
+
+**Score impact**: `overlap=0.0` (vs. 1.0 on every original test
+circuit). 14's overall score = 0.800.
+
+**Severity**: high — any netlist with two genuinely-disconnected
+sub-circuits (multi-domain mixed-signal, decoupling networks, etc.)
+hits this bug.
+
+**Note**: `22_three_isolated_sources.sp` does NOT reproduce the bug
+because the V/R pairs cluster into the same HAC group, so the
+sources never become "isolated" in the placer's sense. The bug
+surface is subtler than the audit predicted.
+
+### Bug 3 — Default mode silently renders only the first .subckt's interior
+
+**Circuit**: `25_subckt_array.sp` (and retrospectively 09 and 10)
+
+`src/lib.rs:64` has this branch:
+
+```rust
+} else if has_subckt_defs {
+    // Flat mode: use first subcircuit's internal devices
+    (&pr.subcircuits[0].devices, HashMap::new())
+}
+```
+
+If a netlist contains *both* `.subckt` definitions *and* top-level
+content (X instances + V/R/etc.), and the user has not passed
+`--hierarchical`, the pipeline renders **only the first subckt's
+internal devices** and silently drops the top-level entirely.
+
+For `25_subckt_array.sp` (8 top-level items including 3 X instances
+and 3 C loads), this means `comps=2` — the INV's M1/M2.
+
+For `09_inverter_chain_hier.sp` and `10_opamp_feedback_hier.sp`, this
+means **every "default-mode" score we ever quoted for those circuits
+was scoring the INV / OPAMP subckt's *interior layout*, not the
+top-level circuit the user wrote.**
+
+**Score impact**: indirectly, every quoted score for 09 / 10 in
+`docs/improve.md`, `docs/architecture.md`, and the README is
+measuring the wrong artifact.
+
+**Severity**: high — the documented results in multiple docs are
+based on a misinterpretation. Phase 4.2 / 4.3 / 4.4's "+0.01 / +0.07
+on 10" claims are about the OPAMP's interior, not the feedback
+amplifier the user wrote.
+
+### Bug 4 — Long flat chains stack vertically instead of cascading horizontally
+
+**Circuits**: `16_inverter_chain_5stage.sp` (5 inverter stages),
+`21_deep_signal_chain.sp` (10 RC stages)
+
+A 5-stage inverter chain produces aspect_ratio 7.3 and 2 wire
+crossings, despite being a one-dimensional left-to-right cascade.
+A 10-stage RC chain produces aspect_ratio 3.9. The Sugiyama placer's
+longest-path layering should give each stage its own DAG layer, but
+something — probably HAC's inverter-pair clustering bunching multiple
+inverters together — is folding the chain back on itself.
+
+**Score impact**: 16 scores 0.723, 21 scores 0.866 (compared to a
+plausible upper bound of ≥0.95 for a clean horizontal layout).
+
+**Severity**: medium — affects any flat circuit with 5+ sequential
+stages.
+
+## Evaluator gaps uncovered
+
+### Gap 1 — `symmetry` sub-score is vacuously 1.0 when no pairs exist
+
+**Circuit**: `20_asymmetric_pair.sp`
+
+`eval/symmetry.rs` returns `overall_score = 1.0` when `matched_pairs`
+is empty. This makes the metric unable to distinguish:
+- "the layout is perfectly symmetric" (intended 1.0), from
+- "there is nothing here to be symmetric about" (vacuous 1.0), from
+- "two devices look like a pair but aren't grouped because their
+  attributes differ" (current behavior: vacuous 1.0).
+
+Combined with the original audit finding that symmetry was at 1.0
+on every original circuit, **the symmetry sub-score is currently
+incapable of producing useful signal on the test set**.
+
+### Gap 2 — `connectivity.found_net_count` only counts labels and power symbols
+
+**Circuit**: `15_pi_attenuator.sp`
+
+`expected_nets=6` but `found_nets=3`. The pi-attenuator's nets are
+mostly connected by direct wires (no labels needed because they're
+short), so they don't appear in `found_net_count` even though they
+are properly routed.
+
+**Severity**: low — doesn't feed into the overall score, but the
+field is misleading when read from the eval JSON.
+
+## Sensitivity sweep update on 25 circuits
+
+The sweep originally run on 11 circuits showed `overlap`, `symmetry`,
+and `power_convention` were **dead** — perturbing them produced zero
+ranking changes. Re-running on 25 circuits:
+
+| Sub-score | Was dead on 11? | Still dead on 25? |
+|---|---|---|
+| `overlap` | ✓ dead | **alive** — `−0.10` shifts 14 by 7 ranks |
+| `symmetry` | ✓ dead | still dead — no circuit yet hits the actual symmetry penalty |
+| `power_convention` | ✓ dead | mostly dead — score moves but rank doesn't, because tied at 1.0 with many others |
+| `crossings` | medium-active | medium-active (unchanged) |
+| `aspect_ratio` | most active | still most active |
+| `wire_length` | low-active | low-active |
+| `label_ratio` | medium-active | medium-active |
+
+Per-circuit score range under ±0.10 weight perturbation:
+
+| Bottom of new table | range under perturbation |
+|---|---:|
+| 13_pdk_mos_model_names | 0.200 |
+| 14_disconnected_filters | 0.200 |
+| 17_folded_cascode_opamp | 0.129 |
+| 03_halfwave_rectifier | 0.162 |
+| 02_rc_lowpass_filter | 0.156 |
+
+**The middle-of-table circuits are now even more weight-sensitive**
+than the original 11 — 13 and 14 swing 0.200 between weight choices,
+larger than the algorithmic gains of any individual phase shipped
+this year.
+
+## Summary table (all 25 circuits, baseline weights)
+
+```
+   1. 01_voltage_divider           1.000
+   2. 06_bjt_diff_pair             1.000
+   3. 11_rlc_controlled_sources    1.000
+   4. 12_industrial_power_names    1.000  (V-source-terminal rule rescues VBAT/VIO)
+   5. 20_asymmetric_pair           1.000  (vacuous — Gap 1)
+   6. 18_star_fanout               0.994
+   7. 09_inverter_chain_hier       0.991  (BUG 3 — measuring wrong thing)
+   8. 04_nmos_common_source        0.979
+   9. 15_pi_attenuator             0.975
+  10. 07_two_stage_opamp           0.974
+  11. 23_pmos_input_inverter       0.959
+  12. 10_opamp_feedback_hier       0.952  (BUG 3 — measuring wrong thing)
+  13. 22_three_isolated_sources    0.950
+  14. 24_dense_amp_array           0.938
+  15. 25_subckt_array              0.916  (BUG 3 — only 2 of 8 components rendered)
+  16. 19_degenerated_diff_pair     0.903
+  17. 13_pdk_mos_model_names       0.900  (BUG 1 — PMOS-below-NMOS)
+  18. 05_nmos_current_mirror       0.892
+  19. 08_bandgap_reference         0.875
+  20. 21_deep_signal_chain         0.866  (BUG 4 — long-chain stacking)
+  21. 02_rc_lowpass_filter         0.844
+  22. 03_halfwave_rectifier        0.838
+  23. 14_disconnected_filters      0.800  (BUG 2 — V1/V2 overlap)
+  24. 17_folded_cascode_opamp      0.750  (real complexity, not a bug)
+  25. 16_inverter_chain_5stage     0.723  (BUG 4 — long-chain stacking)
+```
+
+## Triage: what to fix, what to leave
+
+### Fix now (real bugs, single-circuit reproduction, low-risk fix)
+
+1. **Bug 3 — subckt-default-mode silent dropping**.
+   `lib.rs:64` should clearly distinguish "user wrote a stand-alone
+   subcircuit definition with no top-level usage" (current behavior is
+   reasonable) from "user wrote a hierarchical netlist with both
+   subckts and top-level instances" (current behavior is wrong; it
+   should auto-flatten the X instances or at minimum warn loudly).
+   This is a documentation bug as much as a code bug — every doc that
+   quotes 09's or 10's score is silently misleading.
+
+2. **Bug 2 — isolated-source overlap**.
+   `fix_isolated_source_layers` should disambiguate "two isolated
+   sources" by giving them distinct columns rather than collapsing
+   both to the default. Probably a few lines in placer/mod.rs.
+
+### Investigate (real bugs, but the right fix isn't obvious)
+
+3. **Bug 1 — PMOS-below-NMOS across DAG layers**.
+   The within-layer sort assumption is fundamentally limited.
+   Cross-layer alignment is conceptually similar to Phase 2.2's
+   pair alignment but for polarity. Needs design.
+
+4. **Bug 4 — long-chain stacking**.
+   This is the same issue 02/03 hit but on bigger circuits. Likely
+   the right fix is a "linear-chain" detection in the placer that
+   bypasses HAC and uses pure DAG-layer placement.
+
+### Leave for now (evaluator gaps; lower priority than fixing bugs)
+
+5. **Gap 1 — vacuous symmetry score**.
+   Not a bug exactly, but the symmetry sub-score doesn't carry
+   information when the test set has no asymmetric pairs. Adding
+   "no matched pairs found" → score = N/A (excluded from weighted
+   sum, with weights renormalized) would be more honest.
+
+6. **Gap 2 — connectivity found_net_count is misleading**.
+   Cosmetic; doesn't affect the overall score.
+
+## What this expansion does NOT settle
+
+- **The audit's high-risk items A1–A5** (score weights, advisor
+  thresholds, search presets, aspect-ratio brackets) remain unaddressed.
+  Even with 25 circuits, three of seven sub-dimensions are still mostly
+  inert. Real ablation work on the score weights themselves is the
+  natural next step.
+- **Audit's C1 (power names)** is partially mitigated by the
+  V-source-terminal rule, but a netlist whose power net comes from
+  an ldo subckt or a control IC pin would still fail.
+- **Audit's C2 (MOS keywords)** falls through to bulk inference for
+  the cases tested. A truly broken case (e.g. a PMOS with bulk = a
+  non-power node, model name = `g45p1svt`) is hard to construct
+  realistically.
+
+These remain open and worth follow-up later.
