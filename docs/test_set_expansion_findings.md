@@ -95,18 +95,65 @@ amplifier the user wrote.
 **Circuits**: `16_inverter_chain_5stage.sp` (5 inverter stages),
 `21_deep_signal_chain.sp` (10 RC stages)
 
-A 5-stage inverter chain produces aspect_ratio 7.3 and 2 wire
-crossings, despite being a one-dimensional left-to-right cascade.
-A 10-stage RC chain produces aspect_ratio 3.9. The Sugiyama placer's
-longest-path layering should give each stage its own DAG layer, but
-something — probably HAC's inverter-pair clustering bunching multiple
-inverters together — is folding the chain back on itself.
+**Status update (2026-05-01, after attempted fix)**: this turned out
+to be a **score-formula bias, not a placement bug**. Inspecting the
+actual placement of circuit 16:
 
-**Score impact**: 16 scores 0.723, 21 scores 0.866 (compared to a
-plausible upper bound of ≥0.95 for a clean horizontal layout).
+```
+M1p (0,0)    M1n (0,80)
+V1  (260,0)  V2  (260,140)
+M2p (520,0)  M2n (520,80)
+M3p (780,0)  M3n (780,80)
+M4p (1040,0) M4n (1040,80)
+M5p (1300,0) M5n (1300,80)
+C1  (1560,0)
+```
 
-**Severity**: medium — affects any flat circuit with 5+ sequential
-stages.
+Each inverter stage gets its own DAG layer; the chain runs
+horizontally left-to-right with PMOS above NMOS. The bbox is roughly
+1560 wide × 140 tall, and that is the *correct* schematic for a
+5-stage cascade — a circuit engineer would draw it that way.
+
+The eval scores 0.723 because `aspect_ratio` is `max(w/h, h/w)` —
+the formula treats wide-and-shallow identically to tall-and-narrow
+and penalizes both. So a legitimate horizontal cascade is graded the
+same as a pathological vertical stack, even though one is good
+schematic style and the other isn't.
+
+**Two attempted fixes were tried and reverted**:
+
+1. *Multi-column reflow inside the Unknown block template*. Broke
+   circuit 11 (1.000 → 0.800) by changing block widths and
+   propagating overlap into adjacent blocks.
+
+2. *Linear-chain detection in `annotate_cluster`* — break long chains
+   into one SingleDevice block per device, expecting Sugiyama
+   layering to spread them. Broke circuit 09 (1.000 → 0.788) by
+   producing a single-row 5-device cascade with aspect_ratio 10.5
+   (the "spread them horizontally" outcome the score punishes).
+
+Both reverts confirmed the underlying truth: **the placement is
+already doing the right thing; the score formula is the problem.**
+
+**Score impact**: 16 stays at 0.723 and 21 at 0.866. These are floor
+values of the current scoring formula on *correct* layouts.
+
+**Severity reclassified**: not a code bug. The proper response is
+either:
+
+(a) Change `aspect_ratio` to be less aggressive on wide-but-shallow
+    bboxes — but doing this just to recover 16 / 21's score is the
+    exact "tune the metric to make scores look good" overfitting the
+    audit warned against.
+
+(b) Stop reporting a single weighted overall score; expose the
+    seven sub-scores as a profile and let consumers pick what
+    matters for their use case.
+
+Option (b) is the recommendation. It's a UI / API change, not an
+algorithm change, so it doesn't disturb the placer.
+
+**Severity**: low (no algorithm fix needed).
 
 ## Evaluator gaps uncovered
 
