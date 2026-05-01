@@ -64,6 +64,55 @@ fn diff_pair_pipeline_pairs_devices_symmetrically() {
 }
 
 #[test]
+fn all_examples_pass_tier1_safety_metrics() {
+    // After the 2026-05-01 metric-reform analysis (docs/metric_reform.md)
+    // the score system is conceptually split into two tiers:
+    //   Tier 1 (safety):  overlap, symmetry, power_convention — these
+    //                     should always be 1.0 on a correct pipeline.
+    //                     Anything below 1.0 means a real bug like
+    //                     overlapping components or PMOS-below-NMOS.
+    //   Tier 2 (quality): aspect_ratio, crossings, wire_length,
+    //                     label_ratio — continuous metrics, vary per
+    //                     circuit.
+    // This test guards Tier 1 across all 25 example circuits. Bugs 1
+    // and 2 in the expansion findings each broke this on at least one
+    // circuit; we want a regression alert if either resurfaces.
+    use n2s::eval::score::{compute_score, ScoreWeights};
+
+    let examples = std::fs::read_dir("tests/examples")
+        .expect("tests/examples must exist")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |x| x == "sp"))
+        .map(|e| e.file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+
+    let weights = ScoreWeights::default();
+    let mut failures: Vec<String> = Vec::new();
+
+    for name in &examples {
+        let spice = read_example(name);
+        let schematic = run_pipeline(&spice);
+        let parsed = SpiceParser::new().parse(&spice);
+        let report = n2s::eval::evaluate(&parsed, &schematic);
+        let breakdown = compute_score(&report, &weights);
+
+        if breakdown.overlap_score < 0.999 {
+            failures.push(format!("{}: overlap < 1.0 ({:.3})", name, breakdown.overlap_score));
+        }
+        if breakdown.symmetry_score < 0.999 {
+            failures.push(format!("{}: symmetry < 1.0 ({:.3})", name, breakdown.symmetry_score));
+        }
+        if breakdown.power_convention_score < 0.999 {
+            failures.push(format!("{}: power_convention < 1.0 ({:.3})", name, breakdown.power_convention_score));
+        }
+    }
+
+    assert!(failures.is_empty(),
+        "Tier 1 safety metrics regressed on {} circuit(s):\n  {}",
+        failures.len(), failures.join("\n  "));
+}
+
+#[test]
 fn all_examples_run_through_pipeline_and_eval() {
     let examples = std::fs::read_dir("tests/examples")
         .expect("tests/examples must exist")
