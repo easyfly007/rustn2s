@@ -41,6 +41,100 @@ pub struct ScoreBreakdown {
     pub power_convention_score: f64,
 }
 
+/// Tier 1 — pass/fail safety constraints. Each field is true when the
+/// schematic is correct on that dimension; false means a real bug
+/// (overlap, mismatched pair, PMOS-below-NMOS), not a quality
+/// trade-off. Reported separately from continuous quality metrics
+/// because mixing them in a weighted sum is misleading — see
+/// `docs/metric_reform.md`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SafetyReport {
+    pub no_overlap: bool,
+    pub power_convention_clean: bool,
+    pub symmetry_clean: bool,
+}
+
+impl SafetyReport {
+    /// True when every safety constraint passes.
+    pub fn passes(&self) -> bool {
+        self.no_overlap && self.power_convention_clean && self.symmetry_clean
+    }
+
+    /// Names of the failing constraints (empty when `passes()` is true).
+    pub fn failures(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if !self.no_overlap { out.push("overlap"); }
+        if !self.power_convention_clean { out.push("power_convention"); }
+        if !self.symmetry_clean { out.push("symmetry"); }
+        out
+    }
+}
+
+/// Tier 2 — continuous quality sub-scores in `[0, 1]`. These vary
+/// meaningfully across circuits and reflect routing/placer choices,
+/// not bugs. Don't combine them with a fixed weighted sum; lex-min or
+/// per-circuit weighting is more honest.
+#[derive(Debug, Clone, Serialize)]
+pub struct QualityProfile {
+    pub aspect_ratio: f64,
+    pub crossings: f64,
+    pub wire_length: f64,
+    pub label_ratio: f64,
+}
+
+impl QualityProfile {
+    /// Sub-score values as a fixed-order array, useful for
+    /// lexicographic comparisons. Order is canonical and stable so
+    /// callers can sort or compare profiles without naming fields.
+    pub fn as_array(&self) -> [f64; 4] {
+        [self.aspect_ratio, self.crossings, self.wire_length, self.label_ratio]
+    }
+
+    /// Lexicographic minimum: returns the worst sub-score paired with
+    /// its name. Used by `n2s-improve --lex-min` to optimize the
+    /// weakest dimension first.
+    pub fn worst(&self) -> (&'static str, f64) {
+        let mut worst = ("aspect_ratio", self.aspect_ratio);
+        for (name, value) in [
+            ("crossings", self.crossings),
+            ("wire_length", self.wire_length),
+            ("label_ratio", self.label_ratio),
+        ] {
+            if value < worst.1 {
+                worst = (name, value);
+            }
+        }
+        worst
+    }
+}
+
+/// Compute the two-tier evaluation: safety pass/fail + quality
+/// profile. Both tiers are derived from the same raw `EvalReport`,
+/// so this is a pure projection of `compute_score`'s sub-scores into
+/// the cleaner shape recommended by `docs/metric_reform.md`.
+pub fn compute_profile(report: &EvalReport) -> (SafetyReport, QualityProfile) {
+    // Safety: derived from the same per-metric reports as the legacy
+    // sub-scores, but reported as booleans rather than weighted real
+    // numbers.
+    let safety = SafetyReport {
+        no_overlap: report.component_overlap.overlap_count == 0,
+        power_convention_clean: report.power_convention.score >= 0.999,
+        symmetry_clean: report.symmetry.overall_score >= 0.999,
+    };
+
+    // Quality: identical formulas to compute_score, just packaged
+    // into the four-dim continuous profile.
+    let breakdown = compute_score(report, &ScoreWeights::default());
+    let quality = QualityProfile {
+        aspect_ratio: breakdown.aspect_ratio_score,
+        crossings: breakdown.crossings_score,
+        wire_length: breakdown.wire_length_score,
+        label_ratio: breakdown.label_ratio_score,
+    };
+
+    (safety, quality)
+}
+
 /// Compute a single quality score in [0, 1] from an EvalReport.
 /// Higher is better.
 pub fn compute_score(report: &EvalReport, weights: &ScoreWeights) -> ScoreBreakdown {
@@ -359,5 +453,82 @@ mod tests {
         assert!(block.suggested_value > block.current_value);
         let device = advice.iter().find(|a| a.parameter == "device_spacing").unwrap();
         assert!(device.suggested_value > device.current_value);
+    }
+
+    // ---- two-tier compute_profile ----
+
+    #[test]
+    fn compute_profile_perfect_report_passes_safety() {
+        let r = perfect_report();
+        let (safety, _q) = compute_profile(&r);
+        assert!(safety.passes());
+        assert!(safety.failures().is_empty());
+    }
+
+    #[test]
+    fn compute_profile_overlap_violation_flips_safety() {
+        let mut r = perfect_report();
+        r.component_overlap.overlap_count = 1;
+        let (safety, _q) = compute_profile(&r);
+        assert!(!safety.passes());
+        assert!(safety.no_overlap == false);
+        assert_eq!(safety.failures(), vec!["overlap"]);
+    }
+
+    #[test]
+    fn compute_profile_power_convention_failure_is_distinct() {
+        let mut r = perfect_report();
+        r.power_convention.score = 0.5;
+        let (safety, _q) = compute_profile(&r);
+        assert!(!safety.passes());
+        assert!(!safety.power_convention_clean);
+        assert!(safety.no_overlap);
+        assert!(safety.symmetry_clean);
+    }
+
+    #[test]
+    fn quality_profile_worst_picks_minimum() {
+        let q = QualityProfile {
+            aspect_ratio: 0.9,
+            crossings:    0.4,
+            wire_length:  0.7,
+            label_ratio:  0.6,
+        };
+        let (name, value) = q.worst();
+        assert_eq!(name, "crossings");
+        assert!((value - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quality_profile_as_array_has_canonical_order() {
+        let q = QualityProfile {
+            aspect_ratio: 0.1,
+            crossings:    0.2,
+            wire_length:  0.3,
+            label_ratio:  0.4,
+        };
+        let arr = q.as_array();
+        assert_eq!(arr, [0.1, 0.2, 0.3, 0.4]);
+    }
+
+    #[test]
+    fn compute_profile_quality_matches_compute_score_subscores() {
+        // The two functions derive Tier 2 from the same formulas, so
+        // their outputs should agree on the four continuous metrics.
+        let mut r = perfect_report();
+        r.bounding_box.aspect_ratio = 7.0;       // ar bracket 5..10
+        r.wire_crossings.crossing_count = 2;     // 1/3
+        r.wire_length.total_length = 200.0;      // ratio 2 (1 component → ideal 100)
+        r.label_usage.total_labels = 4;
+        r.label_usage.label_pairs = 2;
+        r.label_usage.label_to_wire_ratio = 2.0; // → 1/(1+4) = 0.2
+
+        let breakdown = compute_score(&r, &ScoreWeights::default());
+        let (_safety, quality) = compute_profile(&r);
+
+        assert!((quality.aspect_ratio - breakdown.aspect_ratio_score).abs() < 1e-9);
+        assert!((quality.crossings    - breakdown.crossings_score).abs()    < 1e-9);
+        assert!((quality.wire_length  - breakdown.wire_length_score).abs()  < 1e-9);
+        assert!((quality.label_ratio  - breakdown.label_ratio_score).abs()  < 1e-9);
     }
 }

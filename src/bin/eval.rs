@@ -1,6 +1,6 @@
 use clap::Parser;
 use n2s::eval;
-use n2s::eval::score::{compute_score, ScoreWeights};
+use n2s::eval::score::{compute_profile, compute_score, ScoreWeights};
 use n2s::model::Schematic;
 use n2s::parser::SpiceParser;
 
@@ -57,27 +57,21 @@ fn main() {
     let report = eval::evaluate(&parse_result, &schematic);
 
     if cli.profile {
-        let weights = ScoreWeights::default();
-        let breakdown = compute_score(&report, &weights);
-        // Tier 1 (safety): hard pass/fail. Any of these below 1.0 means
-        // the schematic has a real bug, not a quality issue.
-        let safety_pass = breakdown.overlap_score >= 0.999
-            && breakdown.symmetry_score >= 0.999
-            && breakdown.power_convention_score >= 0.999;
+        // Use the two-tier API (compute_profile) for the structured
+        // safety / quality split, plus compute_score for the legacy
+        // overall= number that consumers may still depend on.
+        let (safety, quality) = compute_profile(&report);
+        let breakdown = compute_score(&report, &ScoreWeights::default());
         let circuit_name = std::path::Path::new(&cli.netlist)
             .file_stem().and_then(|s| s.to_str()).unwrap_or("circuit");
-        // Compact one-line profile: safety | the four continuous quality
-        // sub-scores | overall (legacy weighted sum).
+        let safety_str = if safety.passes() { "PASS".to_string() }
+                         else { format!("FAIL[{}]", safety.failures().join(",")) };
         println!(
-            "{circuit_name:<32} safety={} ovrlp={:.2} sym={:.2} pwr={:.2} | ar={:.2} cross={:.2} wire={:.2} lbl={:.2} | overall={:.3}",
-            if safety_pass { "PASS" } else { "FAIL" },
-            breakdown.overlap_score,
-            breakdown.symmetry_score,
-            breakdown.power_convention_score,
-            breakdown.aspect_ratio_score,
-            breakdown.crossings_score,
-            breakdown.wire_length_score,
-            breakdown.label_ratio_score,
+            "{circuit_name:<32} safety={safety_str} | ar={:.2} cross={:.2} wire={:.2} lbl={:.2} | overall={:.3}",
+            quality.aspect_ratio,
+            quality.crossings,
+            quality.wire_length,
+            quality.label_ratio,
             breakdown.overall,
         );
         return;
