@@ -109,10 +109,14 @@ Key implementation choices that differ from the original design:
    channels around dense placements. We block exactly the bounding rect
    and re-clear pin cells + one cell outward in the pin direction.
 
-3. **Wire-as-obstacle deferred.** `add_wire_cost` exists but is not
-   wired into the routing loop yet — early experiments showed the soft
-   cost forced excessive detours that introduced new wire crossings.
-   Will revisit with smarter weighting.
+3. **Wire-aware crossing penalty (Phase B step 3, shipped).** Each
+   routed wire stamps its cells with a horizontal/vertical orientation
+   flag (`ObstacleGrid::mark_wire_orientation`). When A* later expands
+   a neighbor, stepping into a cell perpendicular to its existing wire
+   adds `crossing_penalty` (default 20.0) to the step cost. This
+   discourages new crossings without forcing detours when there is no
+   alternative. MST edges are also routed shortest-first so tightly-
+   constrained pin pairs commit before flexible long ones.
 
 #### Score comparison (11 test circuits, default vs `--obstacle-avoidance`)
 
@@ -142,8 +146,12 @@ the count of wire-points inside any component bounding rect for example
 04 drops below the L-router baseline. So the trade-off is clear: better
 schematic readability, slightly worse score.
 
-A\* will become default-on once we have a wire-aware crossing
-penalty (Phase B step 3) that prevents the new-crossings regression.
+The wire-aware crossing penalty (Phase B step 3) cut some of the new
+crossings on dense circuits but did not eliminate them — when placement
+density makes detours infeasible, A* still has to cross. A* therefore
+remains opt-in. Becoming default-on would need either better placement
+(more whitespace between blocks) or a smarter routing model (rip-up &
+reroute, channel routing, etc).
 
 ---
 

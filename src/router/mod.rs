@@ -28,6 +28,10 @@ pub struct RouterOptions {
     /// Penalty added to A* g_cost each time the path direction changes.
     /// Higher values prefer straighter wires.
     pub bend_penalty: f64,
+    /// Penalty added to A* g_cost when stepping perpendicular to an
+    /// already-routed wire (i.e. the step would create a visible crossing).
+    /// Higher values prefer detours over crossings.
+    pub crossing_penalty: f64,
 }
 
 impl Default for RouterOptions {
@@ -41,6 +45,7 @@ impl Default for RouterOptions {
             // Enable via --obstacle-avoidance (or set this directly).
             avoid_obstacles: false,
             bend_penalty: 0.5,
+            crossing_penalty: 20.0,
         }
     }
 }
@@ -188,12 +193,20 @@ impl SchematicRouter {
 
         // MST operates on pin positions only
         let positions: Vec<Point> = pins.iter().map(|p| p.position).collect();
-        let edges = minimum_spanning_tree(&positions);
+        let mut edges = minimum_spanning_tree(&positions);
+        // Route shorter edges first: they have less flexibility (any detour
+        // is a large fraction of the original distance), so getting them
+        // down first leaves longer edges free to take roundabout paths.
+        edges.sort_by(|&(a1, b1), &(a2, b2)| {
+            let d1 = positions[a1].distance_to(&positions[b1]);
+            let d2 = positions[a2].distance_to(&positions[b2]);
+            d1.partial_cmp(&d2).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Track which pins need labels (long-distance connections)
         let mut label_pins: HashSet<usize> = HashSet::new();
 
-        let grid_ref = grid;
+        let mut grid_ref = grid;
 
         for &(i, j) in &edges {
             let from = positions[i];
@@ -216,14 +229,21 @@ impl SchematicRouter {
                 let l_route = l_route_best(from, to, &schematic.wires);
                 let wire_pts = match grid_ref.as_deref() {
                     Some(g) if !g.polyline_clear(&l_route) => {
-                        astar::find_path(g, from, to, opts.bend_penalty)
-                            .unwrap_or(l_route)
+                        astar::find_path(
+                            g, from, to,
+                            opts.bend_penalty, opts.crossing_penalty,
+                        ).unwrap_or(l_route)
                     }
                     _ => l_route,
                 };
                 let clean: Vec<Point> = snap_and_dedup(&wire_pts, opts.grid_size);
                 if clean.len() >= 2 {
-                    schematic.wires.push(Wire { points: clean });
+                    schematic.wires.push(Wire { points: clean.clone() });
+                    // Mark this wire's cells with their orientation so
+                    // subsequent A* searches can avoid creating crossings.
+                    if let Some(g) = grid_ref.as_deref_mut() {
+                        g.mark_wire_orientation(&clean);
+                    }
                 }
             }
         }

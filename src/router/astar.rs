@@ -14,8 +14,10 @@ use std::collections::{BinaryHeap, HashMap};
 
 use crate::model::{Component, PinDirection, Point, SymbolDef};
 
-/// Rectangular grid of cells, each either blocked (hard obstacle) or
-/// optionally carrying a soft cost (already-routed wire).
+/// Rectangular grid of cells. Each cell tracks (a) whether it is hard-
+/// blocked by a component body, and (b) which orientations of already-
+/// routed wires pass through it. The orientation flags drive the wire-
+/// aware crossing penalty inside `find_path`.
 #[derive(Clone)]
 pub struct ObstacleGrid {
     pub origin: Point,
@@ -23,7 +25,10 @@ pub struct ObstacleGrid {
     pub rows: usize,
     pub cell_size: f64,
     blocked: Vec<bool>,
-    soft_cost: Vec<f64>,
+    /// True if a horizontal wire passes through this cell.
+    wire_h: Vec<bool>,
+    /// True if a vertical wire passes through this cell.
+    wire_v: Vec<bool>,
 }
 
 impl ObstacleGrid {
@@ -36,13 +41,15 @@ impl ObstacleGrid {
         let height = (max.y - min.y) + MARGIN * 2.0;
         let cols = (width / cell_size).ceil() as usize + 1;
         let rows = (height / cell_size).ceil() as usize + 1;
+        let n = cols * rows;
         Self {
             origin,
             cols,
             rows,
             cell_size,
-            blocked: vec![false; cols * rows],
-            soft_cost: vec![0.0; cols * rows],
+            blocked: vec![false; n],
+            wire_h: vec![false; n],
+            wire_v: vec![false; n],
         }
     }
 
@@ -100,8 +107,12 @@ impl ObstacleGrid {
         true
     }
 
-    pub fn cell_cost(&self, col: usize, row: usize) -> f64 {
-        self.soft_cost[self.idx(col, row)]
+    pub fn has_horizontal_wire(&self, col: usize, row: usize) -> bool {
+        self.wire_h[self.idx(col, row)]
+    }
+
+    pub fn has_vertical_wire(&self, col: usize, row: usize) -> bool {
+        self.wire_v[self.idx(col, row)]
     }
 
     /// Hard-block all cells whose center lies inside `[min..max]` inflated
@@ -130,31 +141,30 @@ impl ObstacleGrid {
         }
     }
 
-    /// Bump soft cost along a polyline. Each cell encountered along the
-    /// segments gets `cost` added to its existing soft cost so subsequent
-    /// A* searches prefer different tracks. Reserved for the wire-as-
-    /// obstacle pass (Phase B step 3).
-    #[allow(dead_code)]
-    pub fn add_wire_cost(&mut self, points: &[Point], cost: f64) {
+    /// Mark each cell along the polyline with the orientation of its
+    /// covering segment. Horizontal segments set `wire_h`; vertical
+    /// segments set `wire_v`. Diagonal or zero-length segments are skipped.
+    /// Subsequent `find_path` calls use these flags to penalize steps that
+    /// would create a perpendicular crossing with an existing wire.
+    pub fn mark_wire_orientation(&mut self, points: &[Point]) {
         for window in points.windows(2) {
-            self.add_segment_cost(window[0], window[1], cost);
-        }
-    }
-
-    #[allow(dead_code)]
-    fn add_segment_cost(&mut self, a: Point, b: Point, cost: f64) {
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-6 { return; }
-        let steps = (len / self.cell_size).ceil() as usize + 1;
-        for i in 0..=steps {
-            let t = i as f64 / steps as f64;
-            let p = Point::new(a.x + dx * t, a.y + dy * t);
-            let (c, r) = self.world_to_cell(p);
-            if self.in_bounds(c, r) {
+            let a = window[0];
+            let b = window[1];
+            let horizontal = (a.y - b.y).abs() < 1e-6 && (a.x - b.x).abs() > 1e-6;
+            let vertical   = (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() > 1e-6;
+            if !horizontal && !vertical { continue; }
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let len = (dx * dx + dy * dy).sqrt();
+            let steps = (len / self.cell_size).ceil() as usize + 1;
+            for i in 0..=steps {
+                let t = i as f64 / steps as f64;
+                let p = Point::new(a.x + dx * t, a.y + dy * t);
+                let (c, r) = self.world_to_cell(p);
+                if !self.in_bounds(c, r) { continue; }
                 let idx = self.idx(c as usize, r as usize);
-                self.soft_cost[idx] += cost;
+                if horizontal { self.wire_h[idx] = true; }
+                if vertical   { self.wire_v[idx] = true; }
             }
         }
     }
@@ -258,14 +268,21 @@ fn dir_idx(d: Dir) -> usize {
     match d { Dir::None => 0, Dir::Up => 1, Dir::Down => 2, Dir::Left => 3, Dir::Right => 4 }
 }
 
-/// Grid-based A* with a bend penalty. The path returned has its endpoints
-/// replaced with the actual `from` / `to` world points (so callers see a
-/// pin-to-pin polyline, not a cell-center polyline) and is run through
-/// `simplify_path` to merge collinear segments.
+/// Grid-based A* with a bend penalty and a wire-aware crossing penalty.
+///
+/// The path returned has its endpoints replaced with the actual `from`/`to`
+/// world points (so callers see a pin-to-pin polyline, not a cell-center
+/// polyline) and is run through `simplify_path` to merge collinear segments.
+///
+/// `crossing_penalty` is added to the step cost whenever a step would
+/// move perpendicular through a cell already covered by an existing wire
+/// (horizontal step into a `wire_v` cell, or vertical step into a
+/// `wire_h` cell). Paths can still cross when no detour is feasible.
 ///
 /// Returns `None` if either endpoint is out of bounds or no path exists.
 pub fn find_path(
-    grid: &ObstacleGrid, from: Point, to: Point, bend_penalty: f64,
+    grid: &ObstacleGrid, from: Point, to: Point,
+    bend_penalty: f64, crossing_penalty: f64,
 ) -> Option<Vec<Point>> {
     let (sc, sr) = grid.world_to_cell(from);
     let (gc, gr) = grid.world_to_cell(to);
@@ -351,7 +368,16 @@ pub fn find_path(
             if grid.is_blocked(nc, nr) && (nc, nr) != (gc, gr) { continue; }
 
             let bend = if node.dir != Dir::None && node.dir != d { bend_penalty } else { 0.0 };
-            let step = 1.0 + bend + grid.cell_cost(nc, nr);
+            // Crossing penalty: stepping perpendicular through a cell that
+            // already carries a wire of the orthogonal orientation creates a
+            // visible crossing in the final schematic.
+            let crosses = match d {
+                Dir::Up | Dir::Down    => grid.has_horizontal_wire(nc, nr),
+                Dir::Left | Dir::Right => grid.has_vertical_wire(nc, nr),
+                Dir::None => false,
+            };
+            let cross_cost = if crosses { crossing_penalty } else { 0.0 };
+            let step = 1.0 + bend + cross_cost;
             let new_g = cur_g + step;
 
             let key = state_idx(nc, nr, d);
@@ -437,14 +463,72 @@ mod tests {
     }
 
     #[test]
-    fn grid_add_wire_cost_accumulates() {
+    fn mark_wire_orientation_horizontal_only() {
         let mut g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
-        g.add_wire_cost(&[p(10.0, 10.0), p(50.0, 10.0)], 2.0);
-        let (c, r) = g.world_to_cell(p(30.0, 10.0));
-        assert!(g.cell_cost(c as usize, r as usize) > 0.0);
-        // Off the wire, no cost
-        let (c2, r2) = g.world_to_cell(p(30.0, 80.0));
-        assert_eq!(g.cell_cost(c2 as usize, r2 as usize), 0.0);
+        g.mark_wire_orientation(&[p(10.0, 50.0), p(80.0, 50.0)]);
+        let (c, r) = g.world_to_cell(p(40.0, 50.0));
+        assert!(g.has_horizontal_wire(c as usize, r as usize));
+        assert!(!g.has_vertical_wire(c as usize, r as usize));
+        // Off the wire, neither flag set
+        let (c2, r2) = g.world_to_cell(p(40.0, 80.0));
+        assert!(!g.has_horizontal_wire(c2 as usize, r2 as usize));
+    }
+
+    #[test]
+    fn mark_wire_orientation_vertical_only() {
+        let mut g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
+        g.mark_wire_orientation(&[p(50.0, 10.0), p(50.0, 80.0)]);
+        let (c, r) = g.world_to_cell(p(50.0, 40.0));
+        assert!(g.has_vertical_wire(c as usize, r as usize));
+        assert!(!g.has_horizontal_wire(c as usize, r as usize));
+    }
+
+    #[test]
+    fn mark_wire_orientation_l_shape() {
+        let mut g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
+        // L-shape: horizontal then vertical, sharing corner at (80, 30).
+        g.mark_wire_orientation(&[p(10.0, 30.0), p(80.0, 30.0), p(80.0, 90.0)]);
+        let (hc, hr) = g.world_to_cell(p(40.0, 30.0));
+        assert!(g.has_horizontal_wire(hc as usize, hr as usize));
+        let (vc, vr) = g.world_to_cell(p(80.0, 60.0));
+        assert!(g.has_vertical_wire(vc as usize, vr as usize));
+        // Corner cell carries both
+        let (cc, cr) = g.world_to_cell(p(80.0, 30.0));
+        assert!(g.has_horizontal_wire(cc as usize, cr as usize));
+        assert!(g.has_vertical_wire(cc as usize, cr as usize));
+    }
+
+    #[test]
+    fn find_path_avoids_perpendicular_crossing_when_alternative_exists() {
+        // Existing horizontal wire at y=50 from x=20 to x=80.
+        let mut g = ObstacleGrid::new(p(0.0, 0.0), p(200.0, 200.0), 10.0);
+        g.mark_wire_orientation(&[p(20.0, 50.0), p(80.0, 50.0)]);
+
+        // Now route a vertical-ish path from (50, 20) to (50, 90). Direct
+        // route crosses the horizontal at (50, 50). With a high crossing
+        // penalty A* should detour around (e.g., over the wire's edge).
+        let no_pen = find_path(&g, p(50.0, 20.0), p(50.0, 90.0), 0.5, 0.0).unwrap();
+        let with_pen = find_path(&g, p(50.0, 20.0), p(50.0, 90.0), 0.5, 50.0).unwrap();
+
+        // The penalized path is at least as long as the no-penalty one
+        // (could be equal if no detour is feasible) and has at least as
+        // many corners. Crucially, with a sufficiently high penalty it
+        // takes a different route.
+        let len = |path: &[Point]| -> f64 {
+            path.windows(2).map(|w| w[0].distance_to(&w[1])).sum()
+        };
+        assert!(len(&with_pen) >= len(&no_pen));
+        // The detour should leave the crossing cell behind: no segment of
+        // with_pen should pass through (50, 50) crossing horizontally.
+        let on_crossing_cell = with_pen.windows(2).any(|w| {
+            // Vertical segment at x=50 covering y=50?
+            (w[0].x - 50.0).abs() < 1e-3 && (w[1].x - 50.0).abs() < 1e-3
+                && ((w[0].y - 50.0).signum() != (w[1].y - 50.0).signum()
+                    || (w[0].y - 50.0).abs() < 1e-3 || (w[1].y - 50.0).abs() < 1e-3)
+        });
+        assert!(!on_crossing_cell,
+            "penalized A* still routed straight through the crossing: {:?}",
+            with_pen);
     }
 
     // ---- build_grid ----
@@ -483,7 +567,7 @@ mod tests {
     #[test]
     fn find_path_straight_line_no_obstacles() {
         let g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
-        let path = find_path(&g, p(10.0, 50.0), p(90.0, 50.0), 0.5).unwrap();
+        let path = find_path(&g, p(10.0, 50.0), p(90.0, 50.0), 0.5, 5.0).unwrap();
         // Should be straight: 2 points, both endpoints
         assert_eq!(path.len(), 2);
         assert_eq!(path[0], p(10.0, 50.0));
@@ -493,7 +577,7 @@ mod tests {
     #[test]
     fn find_path_l_shape_one_bend() {
         let g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
-        let path = find_path(&g, p(10.0, 10.0), p(90.0, 90.0), 0.5).unwrap();
+        let path = find_path(&g, p(10.0, 10.0), p(90.0, 90.0), 0.5, 5.0).unwrap();
         // Bend penalty discourages zigzags → expect 3 points (one corner).
         assert_eq!(path.len(), 3, "got {:?}", path);
         assert_eq!(path[0], p(10.0, 10.0));
@@ -505,7 +589,7 @@ mod tests {
         let mut g = ObstacleGrid::new(p(0.0, 0.0), p(200.0, 200.0), 10.0);
         // Wall blocking the direct route from (10,100) to (190,100)
         g.block_rect(p(80.0, 50.0), p(120.0, 150.0), 0);
-        let path = find_path(&g, p(10.0, 100.0), p(190.0, 100.0), 0.5).unwrap();
+        let path = find_path(&g, p(10.0, 100.0), p(190.0, 100.0), 0.5, 5.0).unwrap();
         assert!(path.len() >= 3, "must bend around obstacle, got {:?}", path);
         // No path point should land on a blocked cell
         for pt in &path[1..path.len() - 1] {
@@ -524,14 +608,14 @@ mod tests {
         // no neighbors are.
         g.unblock_at(p(20.0, 50.0));
         g.unblock_at(p(80.0, 50.0));
-        let result = find_path(&g, p(20.0, 50.0), p(80.0, 50.0), 0.5);
+        let result = find_path(&g, p(20.0, 50.0), p(80.0, 50.0), 0.5, 5.0);
         assert!(result.is_none(), "should fail when fully walled off");
     }
 
     #[test]
     fn find_path_same_endpoint_is_trivial() {
         let g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
-        let path = find_path(&g, p(50.0, 50.0), p(50.0, 50.0), 0.5).unwrap();
+        let path = find_path(&g, p(50.0, 50.0), p(50.0, 50.0), 0.5, 5.0).unwrap();
         assert_eq!(path.len(), 2);
         assert_eq!(path[0], path[1]);
     }

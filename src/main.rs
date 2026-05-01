@@ -56,6 +56,11 @@ struct Cli {
     /// Bend penalty for A* routing (higher = preferring straighter wires)
     #[arg(long, default_value_t = 0.5)]
     bend_penalty: f64,
+
+    /// Crossing penalty for A* routing (higher = preferring detours over
+    /// crossing already-routed wires)
+    #[arg(long, default_value_t = 20.0)]
+    crossing_penalty: f64,
 }
 
 fn main() {
@@ -73,6 +78,7 @@ fn main() {
             grid_size: cli.grid,
             avoid_obstacles: cli.obstacle_avoidance,
             bend_penalty: cli.bend_penalty,
+            crossing_penalty: cli.crossing_penalty,
         },
         cluster: n2s::analyzer::ClusterOptions {
             recognize_patterns: !cli.no_patterns,
