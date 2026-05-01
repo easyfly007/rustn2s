@@ -6,15 +6,31 @@ This is a Rust reimplementation of the N2S pipeline from the [MySchematic](https
 
 ## Features
 
+### Core pipeline
+
 - **SPICE Netlist Parsing** — MOSFET (M), BJT (Q), R/C/L/D, voltage/current sources (V/I), controlled sources (E/F/G/H), subcircuit instances (X)
-- **Analog Pattern Recognition** — Automatically identifies differential pairs, current mirrors, cascode pairs, and inverters
-- **Hierarchical Layout** — Sugiyama-based layer assignment with barycenter crossing minimization
-- **Manhattan Routing** — L-shaped wires for short nets, labels for long nets, power symbols for supply nets
+- **Analog Pattern Recognition** — Automatically identifies differential pairs, current mirrors, cascode pairs, and inverters (transistor-family-agnostic across MOSFET + BJT)
+- **Hierarchical Layout** — Sugiyama-based layer assignment with barycenter crossing minimization, multi-column distribution, PMOS-above-NMOS sort, and matched-pair y-alignment
+- **Manhattan Routing** — MST topology with L-routes for short nets, labels for long nets, power symbols for supply nets; adaptive label threshold scaled by bbox diagonal
 - **Optional A\* Obstacle-Aware Routing** — `--obstacle-avoidance` falls back to grid A\* with bend & crossing penalties when an L-route would walk through a component body
 - **14 Builtin Symbols** — nmos4, pmos4, npn, pnp, resistor, capacitor, inductor, diode, vsource, isource, vcvs, vccs, ccvs, cccs
-- **SVG Output** — Dark theme, grid, legends, configurable scale
-- **JSON Output** — Structured schematic data for downstream tools
-- **KiCad Output** — Native `.kicad_sch` files, open directly in KiCad for editing
+
+### Output formats
+
+- **SVG** — Dark theme, grid, legends, configurable scale
+- **JSON** — Structured schematic data for downstream tools
+- **KiCad** — Native `.kicad_sch` files, open directly in KiCad for editing
+
+### Evaluation & optimization (`n2s-eval`, `n2s-improve`)
+
+- **Two-tier evaluation**: Tier 1 *safety* (overlap / power-convention / symmetry — pass/fail) and Tier 2 *quality* (crossings / wire_length / label_ratio — continuous), with `aspect_ratio` reported separately as a *shape signal* rather than mixed into the score. See [docs/metric_reform.md](docs/metric_reform.md).
+- `n2s-eval --profile` emits a one-line per-circuit profile separating shape, quality sub-scores, and the legacy weighted overall.
+- `n2s-improve --search` runs multi-start optimization across deterministic spaced parameter sets (Phase 4.4).
+- `n2s-improve --lex-min` optimizes the worst quality sub-score first (instead of a weighted sum), gated by Tier 1 safety.
+
+### Test suite
+
+25 SPICE example circuits in `tests/examples/` covering simple linear circuits, op-amp topologies, hierarchical netlists, industrial naming conventions (PDK-style MOS models, VBAT/VIO power names), edge cases (disconnected sub-graphs, asymmetric pairs, long chains). `tests/pipeline.rs` runs every example through the pipeline + eval and asserts safety. See [docs/examples.md](docs/examples.md) for circuit descriptions (1–11) and [docs/test_set_expansion_findings.md](docs/test_set_expansion_findings.md) for the rationale behind 12–25.
 
 ## Installation
 
