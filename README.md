@@ -10,6 +10,7 @@ This is a Rust reimplementation of the N2S pipeline from the [MySchematic](https
 - **Analog Pattern Recognition** — Automatically identifies differential pairs, current mirrors, cascode pairs, and inverters
 - **Hierarchical Layout** — Sugiyama-based layer assignment with barycenter crossing minimization
 - **Manhattan Routing** — L-shaped wires for short nets, labels for long nets, power symbols for supply nets
+- **Optional A\* Obstacle-Aware Routing** — `--obstacle-avoidance` falls back to grid A\* with bend & crossing penalties when an L-route would walk through a component body
 - **14 Builtin Symbols** — nmos4, pmos4, npn, pnp, resistor, capacitor, inductor, diode, vsource, isource, vcvs, vccs, ccvs, cccs
 - **SVG Output** — Dark theme, grid, legends, configurable scale
 - **JSON Output** — Structured schematic data for downstream tools
@@ -61,10 +62,14 @@ Options:
   --scale <F64>              SVG scale factor [default: 1.0]
   --no-grid                  Hide grid in SVG output
   --hierarchical             Render subcircuit instances as boxes with ports
-  --obstacle-avoidance       Use A* routing so wires do not cross component
-                             bodies (opt-in; trades wire length for clarity)
+  --obstacle-avoidance       Use A* routing so wires avoid walking through
+                             component bodies (opt-in; see "Obstacle-Aware
+                             Routing" below for trade-offs)
   --bend-penalty <F64>       A* bend penalty when --obstacle-avoidance is on
                              [default: 0.5]
+  --crossing-penalty <F64>   A* crossing penalty when --obstacle-avoidance is
+                             on (higher = prefer detours over crossing
+                             already-routed wires) [default: 20.0]
 ```
 
 ### Example SPICE Input
@@ -114,6 +119,29 @@ SPICE file
 | `export` | SVG renderer (dark theme), JSON serializer, and KiCad `.kicad_sch` exporter |
 
 See [docs/architecture.md](docs/architecture.md) for detailed design documentation, and [docs/learning_resources.md](docs/learning_resources.md) for a curated reading list (algorithms, papers, open-source projects, courses) to study netlist-to-schematic systematically.
+
+## Obstacle-Aware Routing (`--obstacle-avoidance`)
+
+By default the router uses **L-routing**: each wire is a single horizontal-then-vertical (or vertical-then-horizontal) Manhattan path picked to minimize crossings against already-routed wires. L-routing is fast and produces short wires, but it does not know about component geometry — wires can walk straight through MOSFET bodies if the direct route happens to pass over one.
+
+`--obstacle-avoidance` enables a second routing layer:
+
+1. The router rasterizes every placed component's bounding rectangle into a grid (default cell size 10 units, matching the placer grid).
+2. For each MST edge in a signal net, the L-route is tried first. If it lands clear of every body, it is kept (this is the common case).
+3. If the L-route would pass through a body, the router falls back to **grid A\*** with two penalties:
+   - `--bend-penalty` (default `0.5`) — extra cost per direction change, so paths prefer straight runs over staircases.
+   - `--crossing-penalty` (default `20.0`) — extra cost when stepping perpendicular through a cell already covered by an earlier wire, so paths prefer detours over creating visible crossings (still allowed when no detour exists).
+4. Each routed wire stamps its cells with a horizontal/vertical orientation flag, feeding the next iteration's crossing penalty.
+5. MST edges are routed shortest-first so tightly-constrained pin pairs commit before more flexible ones.
+
+**Trade-off.** A\* trades wire length for visual cleanliness:
+- ✅ No wires walk through component bodies (verified by an integration test on example 04).
+- ⚠️ Total wire length usually grows by 20–60% on circuits where the L-router was crossing bodies, because the detour goes around.
+- ⚠️ On dense op-amp circuits (07, 08, 10) the placement leaves no room to detour around earlier wires, so A\* still has to cross — and the extra wire length drags the eval score down by 0.05–0.1.
+
+**Recommended use:** turn on for human-readable schematic output (the project's actual goal); leave off for `n2s-improve`-style score-driven optimization. The flag has no effect on simple linear circuits or sparse layouts, where the L-route is already obstacle-free.
+
+See [docs/routing_improvement.md](docs/routing_improvement.md) for the full design and per-circuit benchmark numbers.
 
 ## Evaluating Schematic Quality
 

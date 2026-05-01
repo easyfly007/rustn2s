@@ -205,10 +205,21 @@ For remaining unassigned devices:
 | Net Type | Distance | Action |
 |---------|----------|--------|
 | Power (GND/VDD/VSS/VCC) | any | Place `PowerSymbol` at each pin |
-| Signal | < threshold (300) | L-shaped Manhattan wire (horizontal first) |
-| Signal | ≥ threshold | `Label` at both endpoints |
+| Signal | < threshold (300) | Manhattan wire — L-route, with optional A\* fallback |
+| Signal | ≥ threshold | `Label` at both endpoints + stub wires |
 
-**Star topology**: All pins connected to first pin (anchor). Junction added at anchor if >2 pins.
+**MST topology**: Pins are connected by a minimum spanning tree (Prim) in pin-distance order. Junction added at any pin connected by more than one MST edge.
+
+**L-route then A\* fallback** (when `RouterOptions::avoid_obstacles` is enabled, see `src/router/astar.rs`):
+
+1. Try `l_route_best`: H-first vs V-first, pick whichever has fewer crossings against existing wires.
+2. If the chosen L-route walks through a component body (checked with `ObstacleGrid::polyline_clear`), fall back to grid A\*:
+   - **Bend penalty** (default 0.5) per direction change so the path prefers two-segment routes over staircases.
+   - **Wire-aware crossing penalty** (default 20.0) when stepping perpendicular through a cell already covered by an earlier wire.
+3. After each successful route, `ObstacleGrid::mark_wire_orientation` stamps the wire's cells with horizontal/vertical flags so the next net can avoid creating a crossing.
+4. MST edges are routed shortest-first so the most constrained pin pairs commit before flexible ones.
+
+The fallback is opt-in (`avoid_obstacles: false` by default) because the detours it produces can lengthen wires on dense placements; see [routing_improvement.md](routing_improvement.md) for benchmark numbers.
 
 ### 5. Export
 
