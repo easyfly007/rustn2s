@@ -219,6 +219,53 @@ fn obstacle_avoidance_keeps_wires_off_component_bodies() {
 }
 
 #[test]
+fn hierarchical_netlist_renders_top_level_by_default() {
+    // Bug 3 in the 2026-05-01 expansion findings: when a netlist had
+    // both .subckt definitions and top-level X instances, the default
+    // pipeline silently rendered only the first subckt's interior,
+    // dropping all top-level content (including X instances, V sources,
+    // and load components). The fix is to auto-enable hierarchical
+    // mode whenever has_x_instances is true.
+    //
+    // 25_subckt_array.sp has eight top-level items: V1, V2, three X
+    // instances (X1/X2/X3 of INV), and three load caps (C1/C2/C3).
+    // Default mode must render all eight.
+    let spice = read_example("25_subckt_array.sp");
+    let s = run_pipeline(&spice);
+    assert_eq!(s.components.len(), 8,
+        "default mode should render the eight top-level items, got: {:?}",
+        s.components.iter().map(|c| &c.instance_name).collect::<Vec<_>>());
+    let names: Vec<&str> = s.components.iter()
+        .map(|c| c.instance_name.as_str()).collect();
+    for n in ["V1", "V2", "X1", "X2", "X3", "C1", "C2", "C3"] {
+        assert!(names.contains(&n), "missing top-level device {}", n);
+    }
+    // X instances should render as subcircuit boxes (subckt_INV symbol),
+    // not as their internal MOSFETs.
+    assert!(s.components.iter().any(|c| c.symbol_name == "subckt_INV"),
+        "X instances should render as subckt_INV boxes by default");
+}
+
+#[test]
+fn standalone_subckt_definition_still_renders_interior() {
+    // The companion case: a netlist that defines a subckt without
+    // instantiating it at the top level. This is a valid library-style
+    // input — the user wants to view the subckt itself.
+    let spice = "* lib-style: just a subckt definition, no top-level uses\n\
+                 .subckt INV in out vdd vss\n\
+                 M1 out in vdd vdd pch W=4u L=0.18u\n\
+                 M2 out in vss vss nch W=2u L=0.18u\n\
+                 .ends INV\n";
+    let s = run_pipeline(spice);
+    // Two MOSFETs from inside INV.
+    assert_eq!(s.components.len(), 2);
+    let symbols: Vec<&str> = s.components.iter()
+        .map(|c| c.symbol_name.as_str()).collect();
+    assert!(symbols.contains(&"pmos4"));
+    assert!(symbols.contains(&"nmos4"));
+}
+
+#[test]
 fn adaptive_label_ratio_yields_fewer_labels_on_large_circuit() {
     // The two-stage opamp has bbox diagonal ~1250. With the adaptive
     // floor disabled (ratio = 0) the absolute threshold (default 300)

@@ -51,17 +51,35 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
     // 1. Parse
     let pr: ParseResult = parser::SpiceParser::new().parse(spice_text);
 
-    // Decide whether to use hierarchical or flat mode
+    // Decide whether to use hierarchical or flat mode.
+    //
+    // Three rendering paths:
+    //   (a) hierarchical — top-level devices, X instances rendered as
+    //       boxes with ports. Used when the netlist has top-level X
+    //       instances *or* the user passed --hierarchical.
+    //   (b) subckt-only — render the first .subckt's interior. Only used
+    //       when the netlist defines a subckt but never instantiates it
+    //       at the top level (e.g. a standalone library file).
+    //   (c) simple — top-level devices only. Used when there are no
+    //       .subckt definitions at all.
+    //
+    // Prior to this fix, path (a) required the user to pass
+    // --hierarchical explicitly, so any netlist that defined a subckt
+    // *and* instantiated it at the top level fell into path (b) and
+    // silently dropped all top-level content. This was Bug 3 in the
+    // 2026-05-01 test-set-expansion findings.
     let has_x_instances = pr.devices.iter().any(|d| d.device_type == 'X');
     let has_subckt_defs = !pr.subcircuits.is_empty();
-    let use_hierarchical = opts.hierarchical && has_x_instances && has_subckt_defs;
+    let use_hierarchical =
+        (opts.hierarchical || has_x_instances) && has_subckt_defs;
 
     let (devices, subckt_symbols) = if use_hierarchical {
-        // Hierarchical mode: use top-level devices, render X instances as boxes
+        // Hierarchical mode: top-level devices, render X instances as boxes
         let syms = build_subcircuit_symbols(&pr);
         (&pr.devices, syms)
-    } else if has_subckt_defs {
-        // Flat mode: use first subcircuit's internal devices
+    } else if has_subckt_defs && pr.devices.is_empty() {
+        // Subckt-only mode: the netlist defines a subckt but has no
+        // top-level devices. Render the first subckt's interior.
         (&pr.subcircuits[0].devices, HashMap::new())
     } else {
         // Simple mode: top-level devices only
