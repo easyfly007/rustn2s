@@ -200,17 +200,56 @@ optimization is justified by the current data.
 
 In priority order:
 
-1. **Add `--profile` to `n2s-eval`** — emit the seven sub-scores in a
+1. **Add `--profile` to `n2s-eval`** — emit the sub-scores in a
    compact line-per-circuit format. Cheap, immediately useful for
-   triage.
+   triage. ✅ **DONE** (commit `bfa231a`)
 2. **Split `EvalReport` into `SafetyReport` + `QualityProfile`** at
    the API level, while keeping `compute_score` as a back-compat
-   wrapper.
+   wrapper. ✅ **DONE** (commit `9804c67`)
 3. **Update `n2s-improve`** to short-circuit on Tier 1 failure and
-   use lex-min on Tier 2.
+   use lex-min on Tier 2. ✅ **DONE** (commit `f6f2d65`,
+   `--lex-min` flag)
 4. **Drop `aspect_ratio` from the weighted sum entirely.** Compute and
    report it as a separate "shape signal" — the engineer can decide
    whether their long signal chain is supposed to be wide.
+   ✅ **DONE** (commit `39806da` —
+   `QualityProfile::worst_quality()` + `quality_score()` exclude
+   `aspect_ratio`; `n2s-improve --lex-min` uses `worst_quality()`;
+   `n2s-eval --profile` reports `shape=...` separately from
+   `quality=...`)
 
-Step 1 is the smallest unit of useful change and lets the rest of the
-proposal be evaluated against real data.
+All four steps shipped. Back-compat is preserved throughout —
+`compute_score` and `ScoreWeights` are unchanged, so existing
+consumers see identical scores.
+
+### Verified effects on the 25-circuit suite
+
+`n2s-eval --profile` output makes the shape/quality split visible:
+
+```
+01_voltage_divider          safety=PASS | shape=1.00 | cross=1.00 wire=1.00 lbl=1.00 → quality=1.000 | overall=1.000
+02_rc_lowpass_filter        safety=PASS | shape=0.22 | cross=1.00 wire=1.00 lbl=1.00 → quality=1.000 | overall=0.844
+08_bandgap_reference        safety=PASS | shape=1.00 | cross=0.33 wire=0.81 lbl=0.70 → quality=0.576 | overall=0.852
+16_inverter_chain_5stage    safety=PASS | shape=0.36 | cross=0.33 wire=0.63 lbl=0.88 → quality=0.573 | overall=0.723
+```
+
+A few specific re-readings under the new metric:
+
+- **02 RC filter** under legacy: 0.844, "looks not great". Under
+  reform: `quality=1.000` plus `shape=0.22`. The schematic is
+  perfectly routed; it's just narrow because there are 3 devices.
+- **16 inverter chain** under legacy: 0.723, "looks bad". Under
+  reform: `quality=0.573` plus `shape=0.36`. The shape number
+  reflects a wide cascade (legitimate); the quality 0.573 reflects
+  real router weakness (crossings + label-vs-wire trade-offs) that
+  is worth fixing.
+- **08 bandgap**: `shape=1.00 quality=0.576`. The legacy 0.852
+  blended a perfect shape with weak quality; the split shows the
+  layout is ar-clean but routing-poor.
+
+`n2s-improve --lex-min` now optimizes the worst quality sub-score
+rather than the weighted sum, ignoring the shape bias. On 02 it
+converges to `final_score=1.000` immediately (the routing is
+already perfect, ar is irrelevant). On 16 it converges to
+`final_score≈0.67` (the real label-or-wire ceiling, no longer
+masked by the shape penalty).
