@@ -266,48 +266,73 @@ All parameters are clamped to prevent runaway:
 
 ## Results on Test Examples
 
-Results from running `n2s-improve` on all 11 test circuits (after Phase 2.4 source proximity):
+Single representative run on all 11 test circuits, current code (post Phase
+4.4). Scores have small HashMap-iteration-order noise (~ ±0.02–0.05 between
+runs); the figures below are illustrative, not regression-locked.
 
-| Example | Initial | Best | Delta | Iters | Converged | Limiting Factor |
-|---------|---------|------|-------|-------|-----------|-----------------|
-| 01 voltage divider | 0.694 | 0.702 | +0.008 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
-| 02 RC filter | 0.844 | 0.860 | +0.016 | 5 | Yes (stalled) | Aspect ratio (only 3 devices) |
-| 03 half-wave rectifier | 0.838 | 0.844 | +0.006 | 5 | Yes (stalled) | Aspect ratio (only 4 devices) |
-| 04 NMOS CS amp | 0.825 | 0.825 | +0.000 | 1 | Yes (no advice) | Symmetry |
-| **05 current mirror** | **0.966** | **0.966** | **+0.000** | **1** | **Yes (target)** | — |
-| 06 BJT diff pair | 0.699 | 0.883 | +0.184 | 4 | Yes (no advice) | Symmetry (0.33) |
-| **07 two-stage opamp** | **0.956** | **0.956** | **+0.000** | **1** | **Yes (target)** | — |
-| 08 bandgap reference | 0.808 | 0.808 | +0.000 | 2 | Yes (no advice) | Symmetry |
-| **09 inverter chain** | **0.991** | **0.991** | **+0.000** | **1** | **Yes (target)** | — |
-| **10 opamp feedback** | **0.936** | **0.936** | **+0.000** | **1** | **Yes (target)** | — |
-| **11 RLC controlled** | **1.000** | **1.000** | **+0.000** | **1** | **Yes (target)** | — |
+| Example | No-search<br>final | `--search`<br>final | Δ | Restarts<br>used | Limiting sub-score (no-search) |
+|---------|:---:|:---:|:---:|:---:|---|
+| 01 voltage divider | 1.000 | 1.000 | — | 1 | — |
+| **02 RC filter** | 0.844 | **0.876** | +0.032 | 8 | aspect_ratio = 0.22 (3 devices, ratio 9.7) |
+| **03 halfwave rectifier** | 0.844 | **0.860** | +0.016 | 8 | aspect_ratio = 0.19 (4 devices, ratio 12.3) |
+| **04 NMOS CS amp** | 0.979 | **0.994** | +0.015 | 5 | label_ratio = 0.79 |
+| **05 current mirror** | 0.892 | **0.967** | +0.075 | 8 | crossings = 0.50 (1 crossing) + label_ratio 0.67 |
+| 06 BJT diff pair | 1.000 | 1.000 | — | 1 | — |
+| 07 two-stage opamp | 0.978 | 0.978 | — | 8 | label_ratio = 0.78 |
+| **08 bandgap reference** | 0.875 | **0.949** | +0.074 | 8 | crossings = 0.50 + label 0.70 + wire 0.80 |
+| 09 inverter chain | 0.916–0.991 | 0.916–0.991 | — | 1 | — (run-to-run noise) |
+| **10 opamp feedback** | 0.952 | **0.956** | +0.004 | 8 | label_ratio = 0.74 |
+| 11 RLC controlled | 1.000 | 1.000 | — | 1 | — |
 
-**9/11 examples now score ≥0.9** (up from 8/11 before Phase 2.4). Example 09 reaches 0.991 and example 05 reaches 0.966.
+**With `--search`, 9/11 examples score ≥ 0.94, with 5 of those at ≥ 0.99**.
+Multi-start search makes the biggest difference on 02 (+3 pts), 04 (+1.5),
+05 (+7.5), and 08 (+7.4) — all circuits where the user-supplied default
+parameters happen to land in a poor local optimum.
 
 ### Key Observations
 
-1. **Source proximity (Phase 2.4) significantly improved circuits with V/I sources.** Example 05 jumped from 0.930 to 0.966 and example 09 from 0.916 to 0.991.
+1. **Symmetry is no longer a bottleneck.** Phases 2.2 (cross-block
+   alignment), 2.3 (PMOS-above-NMOS), and the pair-aware Unknown block
+   template together drove the symmetry sub-score to **1.0** on every test
+   circuit. The earlier "04/06/08 limited by symmetry" claim is stale.
 
-2. **All Phases 1–3 combined** brought the average score from ~0.80 to ~0.90 across all examples. The algorithmic fixes (Phases 2–3) were far more impactful than parameter tuning (Phase 1).
+2. **Today's bottlenecks** are:
+   - **Aspect ratio** for small linear circuits (02, 03) — inherent
+     limitation when the netlist has only 3–4 devices.
+   - **Wire crossings** for 05 and 08 — one crossing each that the router
+     can't avoid given the current placement.
+   - **Label ratio** for several mid-sized circuits (04, 07, 10) — the
+     router uses labels for nets longer than the threshold; many circuits
+     would be more readable with longer wires than labels, but bumping
+     the threshold trades against wire-length and crossings sub-scores.
 
-3. **Simple linear circuits** (01, 02, 03) still have high aspect ratios because they have only 3-4 devices — inherent limitation of small circuits.
+3. **Multi-start search (Phase 4.4) is the cheapest remaining lever.** It
+   never under-performs the single-greedy run (restart 0 always uses the
+   user defaults) and exits early once any restart hits target. For
+   circuits in the bottom half it routinely picks up several percent.
 
-4. **Remaining weak spots** are symmetry (examples 04, 06, 08) where matched devices aren't recognized across certain block configurations.
+4. **Run-to-run noise.** The placer/router internals iterate `HashMap`s,
+   which makes the final score wobble by 0.02–0.05 between runs on
+   circuits with multiple equally-good arrangements (notably 09 swings
+   between 0.916 and 0.991). Don't read finer-than-percent differences
+   between runs as signal — take a median over a few runs when comparing.
 
 ## Limitations
-
-All Phase 1–3 algorithmic issues have been addressed. Remaining quality gaps:
 
 | Issue | Why Parameters Can't Help | Status |
 |-------|---------------------------|--------|
 | ~~Matched devices at different y~~ | ~~Devices in separate blocks~~ | **DONE (Phase 2.2)** |
 | ~~Duplicate labels per net~~ | ~~Router emits 2 labels per pin pair~~ | **DONE (Phase 3.1)** |
-| ~~Wire crossings~~ | ~~Fixed horizontal-first L-routing~~ | **DONE (Phase 3.2)** |
+| ~~Wire crossings on simple cases~~ | ~~Fixed horizontal-first L-routing~~ | **DONE (Phase 3.2)** |
 | ~~Sources separated from circuit~~ | ~~Source blocks have no DAG edges~~ | **DONE (Phase 2.4)** |
 | ~~Labels overlapping component bodies~~ | ~~Router emitted labels at raw pin positions~~ | **DONE (Phase 4.3)** |
 | ~~BJT diff pair / mirror not recognized~~ | ~~Pattern finders hard-coded to `device_type == 'M'`~~ | **DONE (BJT pattern extension)** |
-| ~~Low symmetry for matched pairs inside the same cluster block~~ | ~~`align_matched_pairs` only shifted whole blocks, so same-block pairs like 08's Q1/Q2 were left stacked~~ | **DONE (pair-aware `Unknown` template)** |
+| ~~Low symmetry for matched pairs inside the same cluster block~~ | ~~`align_matched_pairs` only shifted whole blocks~~ | **DONE (pair-aware `Unknown` template)** |
+| ~~Greedy advisor stuck at local optima for circuits with poor initial geometry~~ | ~~Single starting point in the parameter space~~ | **DONE (Phase 4.4 multi-start search)** |
+| Wires walking through component bodies | L-router doesn't see geometry | **WORKAROUND** (`--obstacle-avoidance`) |
 | Small circuit aspect ratio | Only 3-4 devices, too few for multi-column | Inherent limitation |
+| Residual crossings on 05 / 08 | Placement leaves no detour room | Open |
+| Aggressive label use on mid-sized opamps | `label_threshold` is one global knob | Open (could go adaptive) |
 
 ## Architecture
 
