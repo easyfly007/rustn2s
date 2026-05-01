@@ -1,7 +1,9 @@
 use clap::Parser;
 use serde::Serialize;
 use n2s::eval;
-use n2s::eval::score::{self, ScoreWeights, ScoreBreakdown, TuningAdvice};
+use n2s::eval::score::{
+    self, compute_profile, ScoreBreakdown, ScoreWeights, TuningAdvice,
+};
 use n2s::model::Schematic;
 use n2s::parser::{ParseResult, SpiceParser};
 use n2s::ConvertOptions;
@@ -85,7 +87,14 @@ struct Cli {
     /// deterministic spaced points across the parameter space.
     #[arg(long, default_value_t = 8)]
     search_restarts: usize,
+
+    /// Use lex-min comparison (Tier 2 worst-sub-score-first) instead of
+    /// the legacy weighted-sum overall score. Bails out immediately if
+    /// Tier 1 safety constraints fail. See docs/metric_reform.md.
+    #[arg(long)]
+    lex_min: bool,
 }
+
 
 /// Parameters being tuned across iterations.
 #[derive(Debug, Clone, Serialize)]
@@ -231,8 +240,19 @@ fn optimize_from(
             }
         }
 
-        if breakdown.overall > best_score {
-            best_score = breakdown.overall;
+        // Compute the comparator score:
+        //   --lex-min: Tier 1 PASS → worst Tier 2 sub-score; Tier 1 FAIL
+        //              → -1.0 (always loses to any passing run).
+        //   default:   legacy weighted overall.
+        let cmp_score = if cli.lex_min {
+            let (safety, quality) = compute_profile(&report);
+            if safety.passes() { quality.worst().1 } else { -1.0 }
+        } else {
+            breakdown.overall
+        };
+
+        if cmp_score > best_score {
+            best_score = cmp_score;
             best_params = params.clone();
             best_schematic = Some(schematic);
             best_breakdown = breakdown.clone();
@@ -246,11 +266,18 @@ fn optimize_from(
             advice: advice.clone(),
         });
 
-        if breakdown.overall >= cli.target_score {
+        if cmp_score >= cli.target_score {
             converged = true;
-            convergence_reason = format!(
-                "Target score {:.3} reached at iteration {}", cli.target_score, iter,
-            );
+            convergence_reason = if cli.lex_min {
+                format!(
+                    "Target reached at iteration {}: safety PASS + worst sub-score ≥ {:.3}",
+                    iter, cli.target_score,
+                )
+            } else {
+                format!(
+                    "Target score {:.3} reached at iteration {}", cli.target_score, iter,
+                )
+            };
             break;
         }
 

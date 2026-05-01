@@ -378,6 +378,39 @@ fn adaptive_label_ratio_is_no_op_on_small_circuit() {
 }
 
 #[test]
+fn improve_lex_min_reports_worst_subscore_as_final() {
+    // In --lex-min mode the optimizer compares configurations by the
+    // worst Tier 2 sub-score (worst-first lexicographic). The reported
+    // final_score should therefore be ≤ the legacy weighted-sum
+    // overall, because the worst sub-score is by definition no greater
+    // than the weighted average. Circuit 02 (RC filter) has its
+    // aspect_ratio sub-score at ~0.22 — much lower than the weighted
+    // overall ~0.84. The lex-min final_score should reflect the
+    // weakest dim, not the average.
+    let bin = env!("CARGO_BIN_EXE_n2s-improve");
+    let out = std::process::Command::new(bin)
+        .args([
+            "tests/examples/02_rc_lowpass_filter.sp",
+            "--lex-min",
+            "--max-iter", "3",
+            "--target-score", "0.99",
+            "--quiet",
+        ])
+        .output()
+        .expect("invoke n2s-improve");
+    assert!(out.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let final_score = report["final_score"].as_f64().unwrap();
+    // The legacy weighted sum on 02 lands around 0.84 in default mode.
+    // The lex-min worst-sub-score should be much lower (~0.22 from
+    // aspect_ratio alone). Asserting <= 0.5 is conservative.
+    assert!(final_score <= 0.5,
+        "lex-min final_score should reflect the worst sub-score (~0.22), \
+         got {} — looks like the comparator wasn't wired through",
+        final_score);
+}
+
+#[test]
 fn improve_search_runs_multiple_restarts_when_target_unreachable() {
     // Drive n2s-improve at a target score that example 03 (halfwave
     // rectifier) cannot hit (it's a 4-device linear circuit, capped well
