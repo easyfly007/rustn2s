@@ -20,6 +20,9 @@ struct PinInfo {
 }
 
 pub struct RouterOptions {
+    /// Absolute floor on the wire-vs-label decision. Edges shorter than
+    /// this always become wires; edges longer fall through to the
+    /// adaptive check below.
     pub long_net_threshold: f64,
     pub grid_size: f64,
     /// When true, route short edges via grid A* with component obstacles.
@@ -32,6 +35,13 @@ pub struct RouterOptions {
     /// already-routed wire (i.e. the step would create a visible crossing).
     /// Higher values prefer detours over crossings.
     pub crossing_penalty: f64,
+    /// Fraction of the placement's bounding-box diagonal used as a soft
+    /// lower bound on the effective label threshold. The router uses
+    /// `max(long_net_threshold, bbox_diagonal × adaptive_label_ratio)` so
+    /// large schematics tolerate longer wires before switching to labels.
+    /// Set to `0.0` to disable adaptive behavior (use the absolute
+    /// `long_net_threshold` only).
+    pub adaptive_label_ratio: f64,
 }
 
 impl Default for RouterOptions {
@@ -46,6 +56,7 @@ impl Default for RouterOptions {
             avoid_obstacles: false,
             bend_penalty: 0.5,
             crossing_penalty: 20.0,
+            adaptive_label_ratio: 0.3,
         }
     }
 }
@@ -153,6 +164,16 @@ impl SchematicRouter {
             None
         };
 
+        // Adaptive label threshold: scale up the wire-vs-label cutoff for
+        // larger schematics so a fixed user threshold doesn't prematurely
+        // force medium-distance nets onto labels. Acts as an additional
+        // floor — never goes below the user-supplied absolute threshold.
+        let (bb_min, bb_max) = placement.bounding_rect;
+        let bbox_diag = ((bb_max.x - bb_min.x).powi(2)
+            + (bb_max.y - bb_min.y).powi(2)).sqrt();
+        let effective_threshold = opts.long_net_threshold
+            .max(bbox_diag * opts.adaptive_label_ratio);
+
         // Route each net
         for (net_name, pins) in &net_connections {
             if pins.len() < 2 { continue; }
@@ -160,7 +181,10 @@ impl SchematicRouter {
             if power_nets.contains(&net_name.to_lowercase()) || power_nets.contains(net_name) {
                 self.route_power_net(&mut schematic, net_name, pins, opts);
             } else {
-                self.route_signal_net(&mut schematic, net_name, pins, opts, obstacle_grid.as_mut());
+                self.route_signal_net(
+                    &mut schematic, net_name, pins, opts,
+                    effective_threshold, obstacle_grid.as_mut(),
+                );
             }
         }
 
@@ -187,6 +211,7 @@ impl SchematicRouter {
 
     fn route_signal_net(
         &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
+        long_net_threshold: f64,
         grid: Option<&mut astar::ObstacleGrid>,
     ) {
         if pins.len() < 2 { return; }
@@ -213,7 +238,7 @@ impl SchematicRouter {
             let to = positions[j];
             let dist = from.distance_to(&to);
 
-            if dist >= opts.long_net_threshold {
+            if dist >= long_net_threshold {
                 // Long edge: mark both endpoints for labeling
                 label_pins.insert(i);
                 label_pins.insert(j);

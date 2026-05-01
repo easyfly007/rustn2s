@@ -61,6 +61,12 @@ struct Cli {
     /// crossing already-routed wires)
     #[arg(long, default_value_t = 20.0)]
     crossing_penalty: f64,
+
+    /// Adaptive label-threshold ratio: the effective threshold is
+    /// max(--label-threshold, bbox_diagonal × this). Set to 0.0 to use
+    /// the absolute --label-threshold only.
+    #[arg(long, default_value_t = 0.3)]
+    adaptive_label_ratio: f64,
 }
 
 fn main() {
@@ -79,6 +85,7 @@ fn main() {
             avoid_obstacles: cli.obstacle_avoidance,
             bend_penalty: cli.bend_penalty,
             crossing_penalty: cli.crossing_penalty,
+            adaptive_label_ratio: cli.adaptive_label_ratio,
         },
         cluster: n2s::analyzer::ClusterOptions {
             recognize_patterns: !cli.no_patterns,

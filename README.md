@@ -70,6 +70,9 @@ Options:
   --crossing-penalty <F64>   A* crossing penalty when --obstacle-avoidance is
                              on (higher = prefer detours over crossing
                              already-routed wires) [default: 20.0]
+  --adaptive-label-ratio <F> Effective label threshold = max(--label-threshold,
+                             bbox_diagonal × this). Set 0.0 to use only the
+                             absolute threshold. [default: 0.3]
 ```
 
 ### Example SPICE Input

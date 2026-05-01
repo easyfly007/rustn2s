@@ -219,6 +219,69 @@ fn obstacle_avoidance_keeps_wires_off_component_bodies() {
 }
 
 #[test]
+fn adaptive_label_ratio_yields_fewer_labels_on_large_circuit() {
+    // The two-stage opamp has bbox diagonal ~1250. With the adaptive
+    // floor disabled (ratio = 0) the absolute threshold (default 300)
+    // promotes several mid-distance edges to labels. With ratio = 0.8
+    // the effective threshold becomes ~1000, so the same edges stay as
+    // wires. The invariant is just: more aggressive ratio → strictly
+    // fewer labels on a large circuit.
+    let spice = read_example("07_two_stage_opamp.sp");
+
+    let opts_off = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            adaptive_label_ratio: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let opts_high = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            adaptive_label_ratio: 0.8,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let s_off = convert_full(&spice, &opts_off).unwrap().schematic;
+    let s_high = convert_full(&spice, &opts_high).unwrap().schematic;
+
+    assert!(s_high.labels.len() < s_off.labels.len(),
+        "expected ratio=0.8 to use fewer labels than ratio=0; got {} vs {}",
+        s_high.labels.len(), s_off.labels.len());
+}
+
+#[test]
+fn adaptive_label_ratio_is_no_op_on_small_circuit() {
+    // The voltage divider has bbox diagonal ~230, so even ratio=1.0
+    // doesn't push the effective threshold above the user default
+    // (300). Output should be identical regardless.
+    let spice = read_example("01_voltage_divider.sp");
+
+    let opts_off = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            adaptive_label_ratio: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let opts_high = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            adaptive_label_ratio: 1.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let s_off = convert_full(&spice, &opts_off).unwrap().schematic;
+    let s_high = convert_full(&spice, &opts_high).unwrap().schematic;
+
+    assert_eq!(s_off.labels.len(), s_high.labels.len(),
+        "adaptive ratio should not change small-circuit label count");
+    assert_eq!(s_off.wires.len(), s_high.wires.len());
+}
+
+#[test]
 fn improve_search_runs_multiple_restarts_when_target_unreachable() {
     // Drive n2s-improve at a target score that example 03 (halfwave
     // rectifier) cannot hit (it's a 4-device linear circuit, capped well
