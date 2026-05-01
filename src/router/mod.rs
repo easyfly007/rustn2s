@@ -22,6 +22,12 @@ struct PinInfo {
 pub struct RouterOptions {
     pub long_net_threshold: f64,
     pub grid_size: f64,
+    /// When true, route short edges via grid A* with component obstacles.
+    /// On A* failure (no path), falls back to the original L-route.
+    pub avoid_obstacles: bool,
+    /// Penalty added to A* g_cost each time the path direction changes.
+    /// Higher values prefer straighter wires.
+    pub bend_penalty: f64,
 }
 
 impl Default for RouterOptions {
@@ -29,6 +35,12 @@ impl Default for RouterOptions {
         Self {
             long_net_threshold: 300.0,
             grid_size: 10.0,
+            // Opt-in: A* avoids walking wires through component bodies, but
+            // it can lengthen routes and create new crossings between
+            // detoured wires, so eval-driven scores are not strictly better.
+            // Enable via --obstacle-avoidance (or set this directly).
+            avoid_obstacles: false,
+            bend_penalty: 0.5,
         }
     }
 }
@@ -117,6 +129,25 @@ impl SchematicRouter {
             }
         }
 
+        // Build the obstacle grid once for the whole schematic. All nets
+        // share it so paths from earlier nets don't get re-checked against
+        // obstacles each time. The grid is only built when obstacle
+        // avoidance is enabled.
+        let mut symbol_map: HashMap<String, SymbolDef> = builtin.clone();
+        for (k, v) in subckt_symbols {
+            symbol_map.insert(k.clone(), v.clone());
+        }
+        let mut obstacle_grid = if opts.avoid_obstacles {
+            Some(astar::build_grid(
+                &schematic.components,
+                &symbol_map,
+                placement.bounding_rect,
+                opts.grid_size,
+            ))
+        } else {
+            None
+        };
+
         // Route each net
         for (net_name, pins) in &net_connections {
             if pins.len() < 2 { continue; }
@@ -124,7 +155,7 @@ impl SchematicRouter {
             if power_nets.contains(&net_name.to_lowercase()) || power_nets.contains(net_name) {
                 self.route_power_net(&mut schematic, net_name, pins, opts);
             } else {
-                self.route_signal_net(&mut schematic, net_name, pins, opts);
+                self.route_signal_net(&mut schematic, net_name, pins, opts, obstacle_grid.as_mut());
             }
         }
 
@@ -151,6 +182,7 @@ impl SchematicRouter {
 
     fn route_signal_net(
         &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
+        grid: Option<&mut astar::ObstacleGrid>,
     ) {
         if pins.len() < 2 { return; }
 
@@ -160,6 +192,8 @@ impl SchematicRouter {
 
         // Track which pins need labels (long-distance connections)
         let mut label_pins: HashSet<usize> = HashSet::new();
+
+        let grid_ref = grid;
 
         for &(i, j) in &edges {
             let from = positions[i];
@@ -171,8 +205,22 @@ impl SchematicRouter {
                 label_pins.insert(i);
                 label_pins.insert(j);
             } else {
-                // Short edge: L-route wire, trying both orientations
-                let wire_pts = l_route_best(from, to, &schematic.wires);
+                // Short edge: prefer A* through the obstacle grid; on no-path
+                // fall back to L-route. When the grid isn't available
+                // (avoid_obstacles=false), use L-route directly.
+                // Try L-route first (it's optimal in clear space). Only fall
+                // through to A* if the L-route would pass through a blocked
+                // cell — i.e., walk through a component body. This keeps
+                // simple circuits at L-route quality and only invokes the
+                // detour-prone A* when we actually need to dodge something.
+                let l_route = l_route_best(from, to, &schematic.wires);
+                let wire_pts = match grid_ref.as_deref() {
+                    Some(g) if !g.polyline_clear(&l_route) => {
+                        astar::find_path(g, from, to, opts.bend_penalty)
+                            .unwrap_or(l_route)
+                    }
+                    _ => l_route,
+                };
                 let clean: Vec<Point> = snap_and_dedup(&wire_pts, opts.grid_size);
                 if clean.len() >= 2 {
                     schematic.wires.push(Wire { points: clean });

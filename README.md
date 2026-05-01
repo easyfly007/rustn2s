@@ -61,6 +61,10 @@ Options:
   --scale <F64>              SVG scale factor [default: 1.0]
   --no-grid                  Hide grid in SVG output
   --hierarchical             Render subcircuit instances as boxes with ports
+  --obstacle-avoidance       Use A* routing so wires do not cross component
+                             bodies (opt-in; trades wire length for clarity)
+  --bend-penalty <F64>       A* bend penalty when --obstacle-avoidance is on
+                             [default: 0.5]
 ```
 
 ### Example SPICE Input

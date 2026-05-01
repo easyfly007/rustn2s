@@ -119,6 +119,106 @@ fn export_json_round_trip() {
 }
 
 #[test]
+fn obstacle_avoidance_keeps_wires_off_component_bodies() {
+    // For example 04 (NMOS common-source), the default L-router walks at
+    // least one wire straight through a transistor body. With A* obstacle
+    // avoidance enabled, no signal-net wire should pass through any
+    // component's bounding rect.
+    use n2s::model::{builtin_symbols, Point};
+    let spice = read_example("04_nmos_common_source.sp");
+
+    let opts_off = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            avoid_obstacles: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let opts_on = ConvertOptions {
+        router: n2s::router::RouterOptions {
+            avoid_obstacles: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let s_off = convert_full(&spice, &opts_off).unwrap().schematic;
+    let s_on = convert_full(&spice, &opts_on).unwrap().schematic;
+
+    // Build an obstacle map per component by transforming each builtin
+    // symbol's bounding rect into world space.
+    let symbols = builtin_symbols::all();
+    let body_rects: Vec<(f64, f64, f64, f64)> = s_on.components.iter()
+        .filter_map(|c| {
+            let sym = symbols.get(&c.symbol_name)?;
+            let base = sym.bounding_rect();
+            let corners = [
+                Point::new(base.left(), base.top()),
+                Point::new(base.right(), base.top()),
+                Point::new(base.left(), base.bottom()),
+                Point::new(base.right(), base.bottom()),
+            ];
+            let mut min_x = f64::MAX;
+            let mut min_y = f64::MAX;
+            let mut max_x = f64::MIN;
+            let mut max_y = f64::MIN;
+            for cp in &corners {
+                let world = c.position + cp.transform(c.rotation, c.mirrored);
+                min_x = min_x.min(world.x);
+                min_y = min_y.min(world.y);
+                max_x = max_x.max(world.x);
+                max_y = max_y.max(world.y);
+            }
+            Some((min_x, min_y, max_x, max_y))
+        })
+        .collect();
+
+    // Sample each wire's interior at fine resolution; count how many sample
+    // points land strictly inside any component body (excluding endpoints).
+    fn count_body_intrusions(
+        wires: &[n2s::model::Wire], rects: &[(f64, f64, f64, f64)],
+    ) -> usize {
+        let mut count = 0;
+        for wire in wires {
+            for window in wire.points.windows(2) {
+                let a = window[0];
+                let b = window[1];
+                let dx = b.x - a.x;
+                let dy = b.y - a.y;
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 1e-6 { continue; }
+                let steps = (len / 2.0).ceil() as usize;
+                for s in 1..steps {
+                    let t = s as f64 / steps as f64;
+                    let p = Point::new(a.x + dx * t, a.y + dy * t);
+                    for &(min_x, min_y, max_x, max_y) in rects {
+                        if p.x > min_x + 0.5 && p.x < max_x - 0.5
+                            && p.y > min_y + 0.5 && p.y < max_y - 0.5
+                        {
+                            count += 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    let off_intrusions = count_body_intrusions(&s_off.wires, &body_rects);
+    let on_intrusions = count_body_intrusions(&s_on.wires, &body_rects);
+
+    // The whole point of A*: drive intrusions toward zero. We require strict
+    // improvement on this circuit, where the L-router has known intrusions.
+    assert!(off_intrusions > 0,
+        "expected L-router to walk through at least one body in example 04 \
+         (otherwise this test isn't measuring anything)");
+    assert!(on_intrusions < off_intrusions,
+        "A* did not reduce body intrusions: off={} on={}",
+        off_intrusions, on_intrusions);
+}
+
+#[test]
 fn export_kicad_writes_kicad_sch_envelope() {
     use n2s::export::kicad;
     use std::collections::HashMap;

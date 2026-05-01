@@ -144,6 +144,7 @@ fn main() {
             router: n2s::router::RouterOptions {
                 long_net_threshold: params.label_threshold,
                 grid_size: cli.grid,
+                ..Default::default()
             },
             cluster: n2s::analyzer::ClusterOptions {
                 recognize_patterns: !cli.no_patterns,

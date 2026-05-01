@@ -1,5 +1,12 @@
 # Routing Improvement Plan
 
+## Status
+
+- **Phase B (A\* obstacle-aware routing)** — Implemented and shipped as
+  **opt-in** behind `--obstacle-avoidance` (default off). See "Phase B —
+  results and trade-offs" below.
+- **Phase C (channel routing)** — Future, designed below.
+
 ## Phase B: A* Grid Routing
 
 ### Problem
@@ -79,6 +86,64 @@ Compare SVG outputs before/after. Key test cases:
 - `08_bandgap_reference` — dense layout, verify fallback works
 
 Use `n2s-eval` to verify `wire_crossings` metric decreases.
+
+---
+
+### Phase B — results and trade-offs (as shipped)
+
+Implemented in `src/router/astar.rs` + `src/router/mod.rs` (gated on
+`RouterOptions::avoid_obstacles`, exposed by the CLI as
+`--obstacle-avoidance`, off by default).
+
+Key implementation choices that differ from the original design:
+
+1. **L-route first, A\* as fallback.** `route_signal_net` always tries
+   `l_route_best` first and runs `polyline_clear` against the obstacle
+   grid; A\* is only invoked when the L-route would walk through a
+   component body. This keeps simple circuits at L-route quality and
+   avoids A\*'s detour cost when there is no obstacle.
+
+2. **No inflation around blocked rects.** The symbol's bounding rect
+   already includes pin-stub offsets (e.g. NMOS pin G at x=-30 from a
+   body at x=-10), so even one cell of clearance seals off most routing
+   channels around dense placements. We block exactly the bounding rect
+   and re-clear pin cells + one cell outward in the pin direction.
+
+3. **Wire-as-obstacle deferred.** `add_wire_cost` exists but is not
+   wired into the routing loop yet — early experiments showed the soft
+   cost forced excessive detours that introduced new wire crossings.
+   Will revisit with smarter weighting.
+
+#### Score comparison (11 test circuits, default vs `--obstacle-avoidance`)
+
+| Example | Default | `--obstacle-avoidance` | Δ |
+|---------|:---:|:---:|:---:|
+| 01 voltage divider | 1.000 | 1.000 | — |
+| 02 RC filter | 0.844 | 0.844 | — |
+| 03 halfwave rectifier | 0.838 | 0.838 | — |
+| 04 NMOS common-source | 0.979 | 0.979 | — |
+| 05 NMOS current mirror | 0.967 | 0.967 | — |
+| 06 BJT diff pair | 1.000 | 1.000 | — |
+| **07 two-stage opamp** | 0.978 | **0.871** | **-0.107** |
+| **08 bandgap** | 0.950 | **0.840** | **-0.110** |
+| 09 inverter chain | 0.991 | 0.961 | -0.030 |
+| **10 opamp feedback** | 0.952 | **0.853** | **-0.099** |
+| 11 RLC controlled | 1.000 | 1.000 | — |
+
+The losses on 07/08/10 come from two sources: A\*'s detour around
+component bodies introduces new wire crossings (eval weight 0.15), and
+the longer total wire length drops the wire-length sub-score for
+circuits where the L-route was just blowing through bodies but staying
+short.
+
+The `tests/pipeline.rs::obstacle_avoidance_keeps_wires_off_component_bodies`
+integration test verifies the **visual** improvement: with A\* enabled,
+the count of wire-points inside any component bounding rect for example
+04 drops below the L-router baseline. So the trade-off is clear: better
+schematic readability, slightly worse score.
+
+A\* will become default-on once we have a wire-aware crossing
+penalty (Phase B step 3) that prevents the new-crossings regression.
 
 ---
 

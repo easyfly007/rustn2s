@@ -47,6 +47,15 @@ struct Cli {
     /// Render subcircuit instances as boxes with ports (hierarchical view)
     #[arg(long)]
     hierarchical: bool,
+
+    /// Enable obstacle-aware A* routing (wires avoid component bodies).
+    /// Off by default — see docs/routing_improvement.md for trade-offs.
+    #[arg(long)]
+    obstacle_avoidance: bool,
+
+    /// Bend penalty for A* routing (higher = preferring straighter wires)
+    #[arg(long, default_value_t = 0.5)]
+    bend_penalty: f64,
 }
 
 fn main() {
@@ -62,6 +71,8 @@ fn main() {
         router: n2s::router::RouterOptions {
             long_net_threshold: cli.label_threshold,
             grid_size: cli.grid,
+            avoid_obstacles: cli.obstacle_avoidance,
+            bend_penalty: cli.bend_penalty,
         },
         cluster: n2s::analyzer::ClusterOptions {
             recognize_patterns: !cli.no_patterns,

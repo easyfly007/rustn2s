@@ -72,6 +72,34 @@ impl ObstacleGrid {
         self.blocked[self.idx(col, row)]
     }
 
+    /// Walk a polyline cell by cell and return true iff every interior
+    /// cell along it is unblocked. Pin cells (the polyline's two endpoints)
+    /// are deliberately not checked because they are guaranteed reachable.
+    pub fn polyline_clear(&self, points: &[Point]) -> bool {
+        for window in points.windows(2) {
+            let a = window[0];
+            let b = window[1];
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let len = (dx * dx + dy * dy).sqrt();
+            if len < 1e-6 { continue; }
+            // Sample the segment at sub-cell resolution so a diagonal pass
+            // isn't able to slip between two blocked cells.
+            let steps = (len / self.cell_size).ceil() as usize * 2;
+            // Skip s == 0 and s == steps (the endpoints — they're pin cells)
+            for s in 1..steps {
+                let t = s as f64 / steps as f64;
+                let p = Point::new(a.x + dx * t, a.y + dy * t);
+                let (c, r) = self.world_to_cell(p);
+                if !self.in_bounds(c, r) { continue; }
+                if self.blocked[self.idx(c as usize, r as usize)] {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     pub fn cell_cost(&self, col: usize, row: usize) -> f64 {
         self.soft_cost[self.idx(col, row)]
     }
@@ -104,13 +132,16 @@ impl ObstacleGrid {
 
     /// Bump soft cost along a polyline. Each cell encountered along the
     /// segments gets `cost` added to its existing soft cost so subsequent
-    /// A* searches prefer different tracks.
+    /// A* searches prefer different tracks. Reserved for the wire-as-
+    /// obstacle pass (Phase B step 3).
+    #[allow(dead_code)]
     pub fn add_wire_cost(&mut self, points: &[Point], cost: f64) {
         for window in points.windows(2) {
             self.add_segment_cost(window[0], window[1], cost);
         }
     }
 
+    #[allow(dead_code)]
     fn add_segment_cost(&mut self, a: Point, b: Point, cost: f64) {
         let dx = b.x - a.x;
         let dy = b.y - a.y;
@@ -177,7 +208,11 @@ pub fn build_grid(
             max_x = max_x.max(world.x);
             max_y = max_y.max(world.y);
         }
-        grid.block_rect(Point::new(min_x, min_y), Point::new(max_x, max_y), 1);
+        // No inflation — the symbol's bounding rect already includes the
+        // pin stubs that extend out from the body, so even 1-cell clearance
+        // ends up sealing off most routing channels around dense placements.
+        // Adding clearance here is left for a future tuning pass.
+        grid.block_rect(Point::new(min_x, min_y), Point::new(max_x, max_y), 0);
 
         // Pin tip cell + one cell outward stay reachable.
         for pin in &sym.pins {
@@ -523,6 +558,31 @@ mod tests {
         let once = simplify_path(&path);
         let twice = simplify_path(&once);
         assert_eq!(once, twice);
+    }
+
+    // ---- polyline_clear ----
+
+    #[test]
+    fn polyline_clear_true_when_no_obstacles() {
+        let g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
+        assert!(g.polyline_clear(&[p(10.0, 10.0), p(90.0, 10.0)]));
+    }
+
+    #[test]
+    fn polyline_clear_false_when_passing_through_block() {
+        let mut g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
+        g.block_rect(p(40.0, 0.0), p(60.0, 100.0), 0);
+        // Horizontal segment from (10, 50) to (90, 50) passes through the wall.
+        assert!(!g.polyline_clear(&[p(10.0, 50.0), p(90.0, 50.0)]));
+    }
+
+    #[test]
+    fn polyline_clear_endpoints_excluded() {
+        // If only the endpoint cells are blocked, polyline_clear returns true.
+        let mut g = ObstacleGrid::new(p(0.0, 0.0), p(100.0, 100.0), 10.0);
+        // Block just the start cell
+        g.block_rect(p(10.0, 10.0), p(10.0, 10.0), 0);
+        assert!(g.polyline_clear(&[p(10.0, 10.0), p(90.0, 10.0)]));
     }
 
     #[test]
