@@ -444,3 +444,96 @@ fn render_legend(svg: &mut String, _w: f64, h: f64, opts: &SvgOptions) {
     write!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Pin</text>\n",
         lx + 147.0, ly + 10.0).unwrap();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Component, Junction, Label, PowerSymbol, PowerType, Wire};
+
+    fn empty_schematic() -> Schematic { Schematic::new("test") }
+
+    #[test]
+    fn render_emits_xml_header_and_closes_svg() {
+        let body = render_to_svg(&empty_schematic(), &SvgOptions::default());
+        assert!(body.starts_with("<?xml"), "missing XML header");
+        assert!(body.contains("<svg "), "missing <svg tag");
+        assert!(body.trim_end().ends_with("</svg>"), "missing </svg> close");
+    }
+
+    #[test]
+    fn theme_color_appears_in_background() {
+        // Default background is #1a1a2e — must end up in the SVG style.
+        let body = render_to_svg(&empty_schematic(), &SvgOptions::default());
+        assert!(body.contains("#1a1a2e"), "background color not in output");
+    }
+
+    #[test]
+    fn no_grid_option_suppresses_grid_dots() {
+        // The grid is rendered as <circle ... class="grid".../>; turn it off.
+        let opts_no_grid = SvgOptions { show_grid: false, ..Default::default() };
+        let body = render_to_svg(&empty_schematic(), &opts_no_grid);
+        // We can't easily distinguish grid dots from other circles, but the
+        // grid section is responsible for the bulk of <circle> elements in
+        // an empty schematic. With grid off, an empty schematic should have
+        // few or no circles before the legend.
+        let opts_with_grid = SvgOptions { show_grid: true, ..Default::default() };
+        let body_with = render_to_svg(&empty_schematic(), &opts_with_grid);
+        assert!(body_with.len() > body.len(),
+            "with-grid output ({} bytes) should be larger than no-grid ({} bytes)",
+            body_with.len(), body.len());
+    }
+
+    #[test]
+    fn wire_renders_as_polyline() {
+        let mut s = empty_schematic();
+        s.wires.push(Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 10.0)] });
+        let body = render_to_svg(&s, &SvgOptions::default());
+        assert!(body.contains("polyline") || body.contains("class=\"wire\""),
+            "wire not rendered");
+    }
+
+    #[test]
+    fn component_instance_name_appears() {
+        let mut s = empty_schematic();
+        s.components.push(Component {
+            instance_name: "R_TEST_42".into(),
+            symbol_name: "resistor".into(),
+            position: Point::new(0.0, 0.0),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        });
+        let opts = SvgOptions { show_instance_names: true, ..Default::default() };
+        let body = render_to_svg(&s, &opts);
+        assert!(body.contains("R_TEST_42"), "instance name missing from SVG");
+    }
+
+    #[test]
+    fn label_text_appears_verbatim() {
+        let mut s = empty_schematic();
+        s.labels.push(Label { name: "MyNet42".into(), position: Point::new(0.0, 0.0) });
+        let body = render_to_svg(&s, &SvgOptions::default());
+        assert!(body.contains("MyNet42"), "label text not in SVG");
+    }
+
+    #[test]
+    fn power_symbol_uses_themed_color() {
+        let mut s = empty_schematic();
+        s.power_symbols.push(PowerSymbol {
+            power_type: PowerType::VDD,
+            net_name: "VDD".into(),
+            position: Point::new(0.0, 0.0),
+        });
+        let body = render_to_svg(&s, &SvgOptions::default());
+        // Default VDD color is #e76f51
+        assert!(body.contains("#e76f51"), "VDD theme color missing");
+    }
+
+    #[test]
+    fn junctions_render_as_circles() {
+        let mut s = empty_schematic();
+        s.junctions.push(Junction { position: Point::new(0.0, 0.0) });
+        let body = render_to_svg(&s, &SvgOptions::default());
+        assert!(body.contains("class=\"junc\""), "junction class missing");
+    }
+}

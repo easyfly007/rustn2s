@@ -494,3 +494,99 @@ pub fn render_to_file(
     let content = render_to_kicad_sch(schematic, extra_symbols);
     std::fs::write(path, content).map_err(|e| format!("Cannot write {}: {}", path, e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        Component, Junction, Label, Point, PowerSymbol, PowerType, Wire,
+    };
+
+    fn schem() -> Schematic { Schematic::new("kicad_test") }
+
+    fn parens_balanced(s: &str) -> bool {
+        let mut depth: i32 = 0;
+        let mut in_str = false;
+        let mut prev = '\0';
+        for c in s.chars() {
+            if in_str {
+                if c == '"' && prev != '\\' { in_str = false; }
+            } else {
+                match c {
+                    '"' => in_str = true,
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth < 0 { return false; }
+                    }
+                    _ => {}
+                }
+            }
+            prev = c;
+        }
+        depth == 0
+    }
+
+    #[test]
+    fn empty_schematic_emits_well_formed_envelope() {
+        let body = render_to_kicad_sch(&schem(), &HashMap::new());
+        assert!(body.starts_with("(kicad_sch"));
+        assert!(body.contains("(version "));
+        assert!(body.contains("(generator \"n2s\")"));
+        assert!(body.contains("(sheet_instances"));
+        assert!(parens_balanced(&body), "unbalanced parens in output");
+    }
+
+    #[test]
+    fn lib_symbols_section_includes_used_components() {
+        let mut s = schem();
+        s.components.push(Component {
+            instance_name: "R1".into(),
+            symbol_name: "resistor".into(),
+            position: Point::new(0.0, 0.0),
+            rotation: 0,
+            mirrored: false,
+            properties: vec![],
+        });
+        let body = render_to_kicad_sch(&s, &HashMap::new());
+        assert!(body.contains("(lib_symbols"), "lib_symbols section missing");
+        // The resistor library symbol should appear by name somewhere.
+        assert!(body.contains("resistor"), "resistor symbol not referenced");
+        assert!(parens_balanced(&body));
+    }
+
+    #[test]
+    fn wires_emit_wire_blocks() {
+        let mut s = schem();
+        s.wires.push(Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 10.0)] });
+        let body = render_to_kicad_sch(&s, &HashMap::new());
+        assert!(body.contains("(wire"), "expected (wire ...) block");
+        assert!(parens_balanced(&body));
+    }
+
+    #[test]
+    fn labels_and_junctions_appear() {
+        let mut s = schem();
+        s.labels.push(Label { name: "n1".into(), position: Point::new(5.0, 5.0) });
+        s.junctions.push(Junction { position: Point::new(10.0, 0.0) });
+        let body = render_to_kicad_sch(&s, &HashMap::new());
+        assert!(body.contains("n1"), "label name missing");
+        assert!(body.contains("(junction"), "junction block missing");
+        assert!(parens_balanced(&body));
+    }
+
+    #[test]
+    fn power_symbol_creates_lib_entry() {
+        let mut s = schem();
+        s.power_symbols.push(PowerSymbol {
+            power_type: PowerType::GND,
+            net_name: "GND".into(),
+            position: Point::new(0.0, 0.0),
+        });
+        let body = render_to_kicad_sch(&s, &HashMap::new());
+        // The GND name is referenced both in the lib_symbols section and as
+        // an instance of a power symbol.
+        assert!(body.contains("GND"), "GND label missing");
+        assert!(parens_balanced(&body));
+    }
+}
