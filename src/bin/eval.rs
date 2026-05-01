@@ -1,5 +1,6 @@
 use clap::Parser;
 use n2s::eval;
+use n2s::eval::score::{compute_score, ScoreWeights};
 use n2s::model::Schematic;
 use n2s::parser::SpiceParser;
 
@@ -17,6 +18,16 @@ struct Cli {
     /// Pretty-print the JSON output
     #[arg(long)]
     pretty: bool,
+
+    /// Emit a single-line sub-score profile instead of the full eval JSON.
+    /// Format:
+    ///   <circuit-name> safety=PASS|FAIL profile=<7 sub-scores> overall=<float>
+    /// Useful for triage across many circuits and for the metric-reform
+    /// proposal in docs/metric_reform.md — separates the three "safety"
+    /// sub-scores (overlap, symmetry, power_convention) from the four
+    /// continuous quality metrics.
+    #[arg(long)]
+    profile: bool,
 }
 
 fn main() {
@@ -45,7 +56,33 @@ fn main() {
     // Evaluate
     let report = eval::evaluate(&parse_result, &schematic);
 
-    // Output
+    if cli.profile {
+        let weights = ScoreWeights::default();
+        let breakdown = compute_score(&report, &weights);
+        // Tier 1 (safety): hard pass/fail. Any of these below 1.0 means
+        // the schematic has a real bug, not a quality issue.
+        let safety_pass = breakdown.overlap_score >= 0.999
+            && breakdown.symmetry_score >= 0.999
+            && breakdown.power_convention_score >= 0.999;
+        let circuit_name = std::path::Path::new(&cli.netlist)
+            .file_stem().and_then(|s| s.to_str()).unwrap_or("circuit");
+        // Compact one-line profile: safety | the four continuous quality
+        // sub-scores | overall (legacy weighted sum).
+        println!(
+            "{circuit_name:<32} safety={} ovrlp={:.2} sym={:.2} pwr={:.2} | ar={:.2} cross={:.2} wire={:.2} lbl={:.2} | overall={:.3}",
+            if safety_pass { "PASS" } else { "FAIL" },
+            breakdown.overlap_score,
+            breakdown.symmetry_score,
+            breakdown.power_convention_score,
+            breakdown.aspect_ratio_score,
+            breakdown.crossings_score,
+            breakdown.wire_length_score,
+            breakdown.label_ratio_score,
+            breakdown.overall,
+        );
+        return;
+    }
+
     let output = if cli.pretty {
         serde_json::to_string_pretty(&report).unwrap()
     } else {
