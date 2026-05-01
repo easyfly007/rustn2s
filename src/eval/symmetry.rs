@@ -17,9 +17,18 @@ pub struct MatchedPair {
 }
 
 pub fn check(schematic: &Schematic) -> SymmetryReport {
-    // Group components by (symbol_name, key properties like W/L/model)
+    // Group components by (symbol_name, key properties like W/L/model).
+    // Skip independent voltage and current sources: two V sources or two
+    // I sources happen to share an identical match key (no W/L, model
+    // field is the value string which is often the same across instances)
+    // even though they represent unrelated parts of the circuit. Counting
+    // them as a "pair" produced misleading symmetry scores — see Bug 2 in
+    // the 2026-05-01 test-set-expansion findings.
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, comp) in schematic.components.iter().enumerate() {
+        if matches!(comp.symbol_name.as_str(), "vsource" | "isource") {
+            continue;
+        }
         let mut key_parts = vec![comp.symbol_name.clone()];
         // Sort properties for stable key
         let mut props: Vec<(&str, &str)> = comp.properties.iter()

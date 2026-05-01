@@ -251,9 +251,18 @@ impl SchematicPlacer {
             }
         }
 
-        // Group devices by matching key: (symbol_name, sorted W/L/model)
+        // Group devices by matching key: (symbol_name, sorted W/L/model).
+        // Skip V/I sources: two independent voltage sources happen to have
+        // identical match keys (no W/L parameters, model_or_value parsed
+        // from "AC=1" or similar), and forcing their y-coordinates to
+        // align collapses disconnected sub-circuits onto the same row —
+        // Bug 2 in the 2026-05-01 test-set-expansion findings (circuit
+        // 14_disconnected_filters: V1 and V2 ended up at identical
+        // (x, y)). Pure independent sources should not be treated as a
+        // symmetry pair.
         let mut match_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (di, dev) in devices.iter().enumerate() {
+            if matches!(dev.device_type, 'V' | 'I') { continue; }
             let key = Self::device_match_key(dev);
             match_groups.entry(key).or_default().push(di);
         }
