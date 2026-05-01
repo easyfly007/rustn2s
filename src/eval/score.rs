@@ -83,16 +83,15 @@ pub struct QualityProfile {
 }
 
 impl QualityProfile {
-    /// Sub-score values as a fixed-order array, useful for
+    /// All four sub-score values as a fixed-order array, useful for
     /// lexicographic comparisons. Order is canonical and stable so
     /// callers can sort or compare profiles without naming fields.
     pub fn as_array(&self) -> [f64; 4] {
         [self.aspect_ratio, self.crossings, self.wire_length, self.label_ratio]
     }
 
-    /// Lexicographic minimum: returns the worst sub-score paired with
-    /// its name. Used by `n2s-improve --lex-min` to optimize the
-    /// weakest dimension first.
+    /// Lexicographic minimum across all four sub-scores. Returns the
+    /// worst sub-score paired with its name.
     pub fn worst(&self) -> (&'static str, f64) {
         let mut worst = ("aspect_ratio", self.aspect_ratio);
         for (name, value) in [
@@ -105,6 +104,39 @@ impl QualityProfile {
             }
         }
         worst
+    }
+
+    /// Lex-min worst across the *quality* sub-scores only — i.e.
+    /// excludes `aspect_ratio`, which is treated as a shape signal
+    /// rather than a quality metric. See docs/metric_reform.md
+    /// step 7. This is the recommended comparator for new code:
+    /// it stops penalizing legitimately wide signal chains
+    /// (circuits 02, 03, 16, 21 in the test suite).
+    pub fn worst_quality(&self) -> (&'static str, f64) {
+        let mut worst = ("crossings", self.crossings);
+        for (name, value) in [
+            ("wire_length", self.wire_length),
+            ("label_ratio", self.label_ratio),
+        ] {
+            if value < worst.1 {
+                worst = (name, value);
+            }
+        }
+        worst
+    }
+
+    /// Weighted quality score that excludes `aspect_ratio`. The three
+    /// continuous quality sub-scores (crossings, wire_length,
+    /// label_ratio) are combined with weights renormalized so they
+    /// sum to 1.0; aspect_ratio is reported separately as a shape
+    /// signal. Recommended over `compute_score(...).overall` for new
+    /// consumers — see docs/metric_reform.md step 7.
+    pub fn quality_score(&self, weights: &ScoreWeights) -> f64 {
+        let total = weights.crossings + weights.wire_length + weights.label_ratio;
+        if total <= 0.0 { return 1.0; }
+        (weights.crossings  * self.crossings
+         + weights.wire_length * self.wire_length
+         + weights.label_ratio * self.label_ratio) / total
     }
 }
 
@@ -497,6 +529,51 @@ mod tests {
         let (name, value) = q.worst();
         assert_eq!(name, "crossings");
         assert!((value - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn worst_quality_excludes_aspect_ratio() {
+        // aspect_ratio is the lowest, but worst_quality skips it.
+        let q = QualityProfile {
+            aspect_ratio: 0.20,  // shape signal — should be ignored
+            crossings:    0.45,
+            wire_length:  0.80,
+            label_ratio:  0.60,
+        };
+        // worst() includes ar → returns ("aspect_ratio", 0.20)
+        assert_eq!(q.worst().0, "aspect_ratio");
+        // worst_quality() excludes ar → returns ("crossings", 0.45)
+        let (name, value) = q.worst_quality();
+        assert_eq!(name, "crossings");
+        assert!((value - 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quality_score_excludes_aspect_ratio() {
+        let q = QualityProfile {
+            aspect_ratio: 0.0,   // would tank the score if included
+            crossings:    1.0,
+            wire_length:  1.0,
+            label_ratio:  1.0,
+        };
+        let s = q.quality_score(&ScoreWeights::default());
+        assert!((s - 1.0).abs() < 1e-9,
+            "quality_score should ignore aspect_ratio, got {}", s);
+    }
+
+    #[test]
+    fn quality_score_renormalizes_remaining_weights() {
+        let q = QualityProfile {
+            aspect_ratio: 0.5,   // ignored
+            crossings:    0.5,
+            wire_length:  0.5,
+            label_ratio:  0.5,
+        };
+        // With default weights: crossings=0.15, wire_length=0.10,
+        // label_ratio=0.10. Sum 0.35. Renormalized contributions all
+        // multiply 0.5 → 0.5 weighted average.
+        let s = q.quality_score(&ScoreWeights::default());
+        assert!((s - 0.5).abs() < 1e-9);
     }
 
     #[test]

@@ -241,12 +241,15 @@ fn optimize_from(
         }
 
         // Compute the comparator score:
-        //   --lex-min: Tier 1 PASS → worst Tier 2 sub-score; Tier 1 FAIL
-        //              → -1.0 (always loses to any passing run).
-        //   default:   legacy weighted overall.
+        //   --lex-min: Tier 1 PASS → worst Tier 2 *quality* sub-score
+        //              (excludes aspect_ratio per metric-reform step 7
+        //              — aspect_ratio is a shape signal, not a quality
+        //              issue, so a wide signal chain shouldn't drag
+        //              the comparator down). Tier 1 FAIL → -1.0.
+        //   default:   legacy weighted overall (still includes ar).
         let cmp_score = if cli.lex_min {
             let (safety, quality) = compute_profile(&report);
-            if safety.passes() { quality.worst().1 } else { -1.0 }
+            if safety.passes() { quality.worst_quality().1 } else { -1.0 }
         } else {
             breakdown.overall
         };

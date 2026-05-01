@@ -58,20 +58,24 @@ fn main() {
 
     if cli.profile {
         // Use the two-tier API (compute_profile) for the structured
-        // safety / quality split, plus compute_score for the legacy
-        // overall= number that consumers may still depend on.
+        // safety / quality split. Report aspect_ratio as `shape=`
+        // separately from the quality score, per metric-reform step 7.
+        // Also include legacy `overall=` for back-compat consumers.
         let (safety, quality) = compute_profile(&report);
-        let breakdown = compute_score(&report, &ScoreWeights::default());
+        let weights = ScoreWeights::default();
+        let breakdown = compute_score(&report, &weights);
+        let quality_score = quality.quality_score(&weights);
         let circuit_name = std::path::Path::new(&cli.netlist)
             .file_stem().and_then(|s| s.to_str()).unwrap_or("circuit");
         let safety_str = if safety.passes() { "PASS".to_string() }
                          else { format!("FAIL[{}]", safety.failures().join(",")) };
         println!(
-            "{circuit_name:<32} safety={safety_str} | ar={:.2} cross={:.2} wire={:.2} lbl={:.2} | overall={:.3}",
+            "{circuit_name:<32} safety={safety_str} | shape={:.2} | cross={:.2} wire={:.2} lbl={:.2} → quality={:.3} | overall={:.3}",
             quality.aspect_ratio,
             quality.crossings,
             quality.wire_length,
             quality.label_ratio,
+            quality_score,
             breakdown.overall,
         );
         return;

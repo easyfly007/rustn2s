@@ -378,15 +378,16 @@ fn adaptive_label_ratio_is_no_op_on_small_circuit() {
 }
 
 #[test]
-fn improve_lex_min_reports_worst_subscore_as_final() {
-    // In --lex-min mode the optimizer compares configurations by the
-    // worst Tier 2 sub-score (worst-first lexicographic). The reported
-    // final_score should therefore be ≤ the legacy weighted-sum
-    // overall, because the worst sub-score is by definition no greater
-    // than the weighted average. Circuit 02 (RC filter) has its
-    // aspect_ratio sub-score at ~0.22 — much lower than the weighted
-    // overall ~0.84. The lex-min final_score should reflect the
-    // weakest dim, not the average.
+fn improve_lex_min_excludes_shape_signal() {
+    // After step 7 (drop aspect_ratio from the score), --lex-min's
+    // comparator uses worst_quality() — the weakest of the THREE
+    // quality sub-scores (crossings, wire_length, label_ratio),
+    // ignoring aspect_ratio. Circuit 02 (RC filter) has all three
+    // quality sub-scores at 1.0 and only aspect_ratio at ~0.22, so
+    // its lex-min final_score should now be ~1.0, not the ~0.22 we
+    // would have seen if aspect_ratio were still in the comparator.
+    // This exercises the metric-reform principle: a legitimately
+    // wide signal chain shouldn't be penalized in optimization.
     let bin = env!("CARGO_BIN_EXE_n2s-improve");
     let out = std::process::Command::new(bin)
         .args([
@@ -401,12 +402,39 @@ fn improve_lex_min_reports_worst_subscore_as_final() {
     assert!(out.status.success());
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let final_score = report["final_score"].as_f64().unwrap();
-    // The legacy weighted sum on 02 lands around 0.84 in default mode.
-    // The lex-min worst-sub-score should be much lower (~0.22 from
-    // aspect_ratio alone). Asserting <= 0.5 is conservative.
-    assert!(final_score <= 0.5,
-        "lex-min final_score should reflect the worst sub-score (~0.22), \
-         got {} — looks like the comparator wasn't wired through",
+    // Three quality sub-scores all at 1.0 → worst_quality = 1.0.
+    assert!(final_score >= 0.99,
+        "lex-min should ignore aspect_ratio, expecting final_score ≈ 1.0 \
+         (the three quality sub-scores are all 1.0); got {}",
+        final_score);
+}
+
+#[test]
+fn improve_lex_min_reports_worst_quality_subscore() {
+    // Companion test: a circuit where real quality sub-scores are
+    // weak (08 bandgap has crossings=0.33, wire_length≈0.81,
+    // label_ratio≈0.70). lex-min's final_score should reflect the
+    // worst of those three, not the weighted overall.
+    let bin = env!("CARGO_BIN_EXE_n2s-improve");
+    let out = std::process::Command::new(bin)
+        .args([
+            "tests/examples/08_bandgap_reference.sp",
+            "--lex-min",
+            "--max-iter", "3",
+            "--target-score", "0.99",
+            "--quiet",
+        ])
+        .output()
+        .expect("invoke n2s-improve");
+    assert!(out.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let final_score = report["final_score"].as_f64().unwrap();
+    // Worst quality sub-score is well below the legacy weighted
+    // overall (~0.85). Asserting < 0.85 is conservative — we just
+    // want to verify lex-min reports the floor, not the average.
+    assert!(final_score < 0.85,
+        "expected lex-min final_score to reflect the weakest quality \
+         sub-score on 08 (around 0.4-0.7); got {}",
         final_score);
 }
 
