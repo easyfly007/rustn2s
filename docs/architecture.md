@@ -316,7 +316,9 @@ All test SPICE files from the MySchematic C++ test suite.
 
 A standalone binary that reads the original SPICE netlist and generated JSON schematic, then outputs structured JSON metrics. See [examples.md](examples.md) for test circuits and evaluation results.
 
-### Metrics
+### Nine metric modules
+
+The `eval` module computes nine independent metrics. These are the raw measurements; the two-tier API below groups them by what they actually mean.
 
 | Metric | Description |
 |--------|-------------|
@@ -330,17 +332,28 @@ A standalone binary that reads the original SPICE netlist and generated JSON sch
 | `symmetry` | Matched device pair placement score (0–1) |
 | `power_convention` | PMOS-above-NMOS placement score (0–1) |
 
-### Key Findings from Current Implementation
+### Two-tier evaluation API (2026-05-01 metric reform)
 
-Evaluation of 11 test circuits revealed the following quality patterns:
+The original design combined all nine metrics into a single weighted sum (`compute_score(report, weights) → f64`). The [metric reform](metric_reform.md) showed this conflates three incompatible questions — *is the layout buggy?*, *is its shape conventional?*, and *is the routing readable?* — into one uninformative number, where 45% of the weight budget (`overlap`, `symmetry`, `power_convention`) never varies on bug-free output. `evaluate()` now returns two separate structures:
 
-| Finding | Affected Examples | Severity |
-|---------|-------------------|----------|
-| Extreme vertical aspect ratios (up to 42:1) | 01, 03, 06, 11 | High |
-| Low symmetry for matched device pairs | 05, 06, 08 | High |
-| Duplicate labels for same net (e.g., `vout` x8) | 07, 08, 10 | Medium |
-| Wire crossings in complex circuits | 08, 09 | Medium |
-| Sources stacked vertically, disconnected from topology | 07 | Low |
+- **Tier 1 — `SafetyReport { no_overlap, power_convention_clean, symmetry_clean }`.** Hard pass/fail booleans. A failure means a real bug (overlapping components, wrong-polarity stacking, misaligned matched pairs), not a low score. Every circuit in the current suite passes Tier 1.
+- **Tier 2 — `QualityProfile { aspect_ratio, crossings, wire_length, label_ratio }`.** Continuous values in `[0, 1]`, reported separately rather than summed. `aspect_ratio` is treated as a **shape signal**, not a quality metric — a legitimately wide signal chain shouldn't be penalized — so the comparators `worst_quality()` and `quality_score()` exclude it.
+
+**Back-compat:** the legacy `compute_score()` and `ScoreWeights` are unchanged, so existing consumers see identical scores. `n2s-eval --profile` emits the split (`safety=PASS | shape=… | cross=… wire=… lbl=… → quality=… | overall=…`); `n2s-eval --pretty` emits the full JSON report. `n2s-improve --lex-min` short-circuits on Tier 1 failure and optimizes the worst Tier 2 quality sub-score first (lexicographic min), ignoring the shape bias.
+
+### Key Findings from the 25-circuit suite
+
+The suite grew from 11 to 25 circuits on 2026-05-01 (see [test_set_expansion_findings.md](test_set_expansion_findings.md)), which exposed bugs the original 11 couldn't reach. After fixing those, the metric reform profiling found:
+
+| Finding | Affected Examples | Notes |
+|---------|-------------------|-------|
+| `label_ratio` weak (dominant signal) | 12/25 | Real router work — label-vs-wire trade-offs |
+| `wire_length` weak | 7/25 | Real router work — routes too long |
+| `crossings` weak | 5/25 | Real router work — visible wire crossings |
+| `aspect_ratio` weak (shape only) | 02, 03 | Metric bias — narrow but correctly routed |
+| `aspect_ratio` weak + real issues | 16, 17, 21 | Wide cascade (legitimate) plus router weakness |
+
+The placer is essentially done for this suite; the remaining quality ceiling is all in the router.
 
 ---
 
@@ -593,3 +606,11 @@ already at or near target finish in restart 0 with no extra cost.
 Two integration tests in `tests/pipeline.rs` lock the behavior:
 `improve_search_runs_multiple_restarts_when_target_unreachable` and
 `improve_without_search_runs_a_single_restart`.
+
+### Phase 5 — Metric Reform: Two-Tier Evaluation (DONE)
+
+**Problem:** After expanding the suite to 25 circuits and fixing the bugs that exposed (see [test_set_expansion_findings.md](test_set_expansion_findings.md)), profiling showed the single weighted-sum score was uninformative. 45% of the weight budget (`overlap`, `symmetry`, `power_convention`) never varied on bug-free output, and `aspect_ratio` penalized legitimately wide layouts. Weight perturbations of ±0.10 moved scores more than any algorithmic phase ever did.
+
+**Solution:** Split `evaluate()` into a Tier 1 `SafetyReport` (pass/fail correctness booleans) and a Tier 2 `QualityProfile` (continuous, never summed), with `aspect_ratio` demoted to a separate shape signal. `compute_score`/`ScoreWeights` stay as a back-compat wrapper. See the [Two-tier evaluation API](#two-tier-evaluation-api-2026-05-01-metric-reform) section above and [metric_reform.md](metric_reform.md) for the full reasoning and the four implementation steps (commits `bfa231a`, `9804c67`, `f6f2d65`, `39806da`).
+
+**Result:** The reform reveals that, for this suite, the placer is essentially done — every remaining weakness is in the router (`label_ratio`, `wire_length`, `crossings`) or is a shape artifact (02, 03). No further placer tuning is justified by the current data; the [overfitting audit](overfitting_audit.md) cautions against nudging the already-overfit constants before the suite grows further.

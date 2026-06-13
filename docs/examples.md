@@ -416,6 +416,31 @@ n2s tests/examples/11_rlc_controlled_sources.sp -o 11_rlc_controlled_sources.svg
 
 ---
 
+## Expanded Adversarial Suite (12–25)
+
+Circuits 01–11 come from the original C++ MySchematic suite. Circuits 12–25 were added on 2026-05-01 to break the blind spots the [overfitting audit](overfitting_audit.md) predicted — the original 11 saturated three of the score's sub-dimensions and never exercised several real-world conventions. The expansion paid off: these 14 circuits exposed **four real bugs** and **two evaluator gaps** (full write-up in [test_set_expansion_findings.md](test_set_expansion_findings.md)). They are intentionally terse stress cases rather than tutorial circuits, so each is summarized in one line.
+
+| # | Circuit | What it stresses | What it revealed |
+|---|---------|------------------|------------------|
+| 12 | Industrial power names | Power nets named `VBAT`/`VIO` instead of `VDD`/`GND` | Clean — the V-source-terminal rule rescues non-standard power names (1.000) |
+| 13 | PDK MOS model names | NMOS/PMOS split across DAG layers, foundry-style model names | **Bug 1** — PMOS lands below NMOS across layers; `power_convention=0.0` (0.900) |
+| 14 | Disconnected filters | Two fully independent sub-circuits, no shared nets | **Bug 2** — two isolated sources collapse to identical (x, y); `overlap=0.0` (0.800) |
+| 15 | Pi attenuator | Short nets routed entirely by direct wires | **Gap 2** — `found_net_count` undercounts wire-only nets (cosmetic) |
+| 16 | Inverter chain (5-stage) | Long horizontal cascade | **Bug 4** — wide-but-correct layout penalized by `aspect_ratio`; metric bias, not a placement bug (0.723) |
+| 17 | Folded-cascode op-amp | Genuinely complex analog topology | Real routing complexity, not a bug (0.750) |
+| 18 | Star fanout | One net driving many sinks | Clean (0.994) — MST routing handles high fanout |
+| 19 | Degenerated diff pair | Diff pair with source-degeneration resistors | Clean (0.903) |
+| 20 | Asymmetric pair | Two devices that look like a pair but differ in attributes | **Gap 1** — `symmetry` is vacuously 1.000 when no true pairs exist |
+| 21 | Deep signal chain | 10 RC stages in series | **Bug 4** (same shape bias as 16) — long chain, 0.866 |
+| 22 | Three isolated sources | Three V/R source pairs | Clean (0.950) — pairs cluster into HAC groups, so they never become "isolated" (does NOT repro Bug 2) |
+| 23 | PMOS-input inverter | Inverter with PMOS as the input device | Clean (0.959) |
+| 24 | Dense amp array | Many amplifier blocks packed together | Clean (0.938) — scale/density stress |
+| 25 | Subckt array | `.subckt` defs + top-level X instances and loads | **Bug 3** — default mode rendered only the first subckt's interior, dropping 6 of 8 top-level items (now fixed in `lib.rs`) |
+
+Baseline scores above use the legacy weighted `compute_score`; under the [two-tier metric reform](architecture.md#two-tier-evaluation-api-2026-05-01-metric-reform) the shape-bias circuits (02, 03, 16, 21) report a low `shape` signal but a high `quality`, and the safety bugs (13, 14) surface as Tier 1 failures rather than fractional scores.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:
@@ -445,17 +470,17 @@ done
 
 | Device | Type | Examples |
 |--------|------|---------|
-| M | MOSFET | 04, 05, 07, 08, 09, 10 |
-| Q | BJT | 06, 08 |
-| R | Resistor | 01, 02, 03, 04, 05, 06, 07, 08, 10, 11 |
-| C | Capacitor | 02, 03, 04, 07, 08, 09, 10, 11 |
+| M | MOSFET | 04, 05, 07, 08, 09, 10, 13, 16, 17, 20, 23, 24, 25 |
+| Q | BJT | 06, 08, 19 |
+| R | Resistor | 01–08, 10, 11, 12, 13, 14, 15, 18, 19, 20, 22, 24 |
+| C | Capacitor | 02, 03, 04, 07, 08, 09, 10, 11, 12, 14, 16, 17, 21, 23, 24, 25 |
 | L | Inductor | 11 |
 | D | Diode | 03 |
-| V | Voltage source | 01–11 |
-| I | Current source | 05, 06, 07, 10 |
+| V | Voltage source | 01–25 |
+| I | Current source | 05, 06, 07, 10, 17, 19, 20 |
 | E | VCVS | 08, 11 |
 | G | VCCS | 11 |
 | H | CCVS | 11 |
 | F | CCCS | 11 |
-| X | Subcircuit inst | 09, 10 |
-| .subckt | Subcircuit def | 09, 10 |
+| X | Subcircuit inst | 09, 10, 25 |
+| .subckt | Subcircuit def | 09, 10, 25 |
