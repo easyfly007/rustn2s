@@ -1,5 +1,5 @@
+use crate::model::{Point, Schematic};
 use serde::Serialize;
-use crate::model::{Schematic, Point};
 
 #[derive(Debug, Serialize)]
 pub struct WireCrossingReport {
@@ -30,11 +30,15 @@ pub fn check(schematic: &Schematic) -> WireCrossingReport {
     for i in 0..segments.len() {
         for j in (i + 1)..segments.len() {
             // Skip segments from the same wire
-            if segments[i].0 == segments[j].0 { continue; }
+            if segments[i].0 == segments[j].0 {
+                continue;
+            }
 
             if let Some(pt) = segment_intersection(
-                &segments[i].1, &segments[i].2,
-                &segments[j].1, &segments[j].2,
+                &segments[i].1,
+                &segments[i].2,
+                &segments[j].1,
+                &segments[j].2,
             ) {
                 // Exclude shared endpoints (T-junctions at junctions)
                 if is_endpoint(&pt, &segments[i].1, &segments[i].2)
@@ -108,8 +112,12 @@ mod tests {
 
     #[test]
     fn parallel_wires_do_not_cross() {
-        let a = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
-        let b = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
+        let a = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+        };
+        let b = Wire {
+            points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)],
+        };
         let r = check(&schematic_with(vec![a, b], vec![]));
         assert_eq!(r.crossing_count, 0);
     }
@@ -117,8 +125,12 @@ mod tests {
     #[test]
     fn perpendicular_interior_crossing_counts_once() {
         // Horizontal at y=5, vertical at x=5; they cross at (5,5) interior to both.
-        let h = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
-        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let h = Wire {
+            points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)],
+        };
+        let v = Wire {
+            points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)],
+        };
         let r = check(&schematic_with(vec![h, v], vec![]));
         assert_eq!(r.crossing_count, 1);
         let pt = &r.crossings[0].position;
@@ -129,24 +141,38 @@ mod tests {
     fn endpoint_touches_are_not_crossings() {
         // Two segments that share an endpoint at (5,0): not a crossing (only interior
         // intersections count).
-        let a = Wire { points: vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)] };
-        let b = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let a = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)],
+        };
+        let b = Wire {
+            points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)],
+        };
         let r = check(&schematic_with(vec![a, b], vec![]));
         assert_eq!(r.crossing_count, 0);
 
         // T-junction (endpoint of one segment lying on the interior of another)
         // is also not flagged — the strict-interior eps check excludes it.
-        let h = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
-        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
+        let h = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+        };
+        let v = Wire {
+            points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)],
+        };
         let r2 = check(&schematic_with(vec![h, v], vec![]));
         assert_eq!(r2.crossing_count, 0);
     }
 
     #[test]
     fn registered_junction_is_excluded() {
-        let h = Wire { points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)] };
-        let v = Wire { points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)] };
-        let j = Junction { position: Point::new(5.0, 5.0) };
+        let h = Wire {
+            points: vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)],
+        };
+        let v = Wire {
+            points: vec![Point::new(5.0, 0.0), Point::new(5.0, 10.0)],
+        };
+        let j = Junction {
+            position: Point::new(5.0, 5.0),
+        };
         let r = check(&schematic_with(vec![h, v], vec![j]));
         assert_eq!(r.crossing_count, 0);
     }
@@ -154,10 +180,14 @@ mod tests {
     #[test]
     fn segments_within_same_wire_dont_count() {
         // A polyline that self-touches must not be counted (same wire index).
-        let w = Wire { points: vec![
-            Point::new(0.0, 0.0), Point::new(10.0, 0.0),
-            Point::new(10.0, 10.0), Point::new(0.0, 10.0),
-        ] };
+        let w = Wire {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(10.0, 0.0),
+                Point::new(10.0, 10.0),
+                Point::new(0.0, 10.0),
+            ],
+        };
         let r = check(&schematic_with(vec![w], vec![]));
         assert_eq!(r.crossing_count, 0);
     }

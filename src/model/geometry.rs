@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point {
@@ -45,7 +45,10 @@ impl Point {
 impl std::ops::Add for Point {
     type Output = Point;
     fn add(self, rhs: Point) -> Point {
-        Point { x: self.x + rhs.x, y: self.y + rhs.y }
+        Point {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
     }
 }
 
@@ -59,7 +62,12 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(x: f64, y: f64, w: f64, h: f64) -> Self {
-        Self { x, y, width: w, height: h }
+        Self {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 
     pub fn from_points(min: Point, max: Point) -> Self {
@@ -71,10 +79,18 @@ impl Rect {
         }
     }
 
-    pub fn left(&self) -> f64 { self.x }
-    pub fn top(&self) -> f64 { self.y }
-    pub fn right(&self) -> f64 { self.x + self.width }
-    pub fn bottom(&self) -> f64 { self.y + self.height }
+    pub fn left(&self) -> f64 {
+        self.x
+    }
+    pub fn top(&self) -> f64 {
+        self.y
+    }
+    pub fn right(&self) -> f64 {
+        self.x + self.width
+    }
+    pub fn bottom(&self) -> f64 {
+        self.y + self.height
+    }
 }
 
 #[cfg(test)]

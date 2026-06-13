@@ -53,11 +53,12 @@ impl ObstacleGrid {
         }
     }
 
-    fn idx(&self, col: usize, row: usize) -> usize { row * self.cols + col }
+    fn idx(&self, col: usize, row: usize) -> usize {
+        row * self.cols + col
+    }
 
     fn in_bounds(&self, col: i32, row: i32) -> bool {
-        col >= 0 && (col as usize) < self.cols
-            && row >= 0 && (row as usize) < self.rows
+        col >= 0 && (col as usize) < self.cols && row >= 0 && (row as usize) < self.rows
     }
 
     /// Convert a world point to integer cell coordinates (may be out of bounds).
@@ -89,7 +90,9 @@ impl ObstacleGrid {
             let dx = b.x - a.x;
             let dy = b.y - a.y;
             let len = (dx * dx + dy * dy).sqrt();
-            if len < 1e-6 { continue; }
+            if len < 1e-6 {
+                continue;
+            }
             // Sample the segment at sub-cell resolution so a diagonal pass
             // isn't able to slip between two blocked cells.
             let steps = (len / self.cell_size).ceil() as usize * 2;
@@ -98,7 +101,9 @@ impl ObstacleGrid {
                 let t = s as f64 / steps as f64;
                 let p = Point::new(a.x + dx * t, a.y + dy * t);
                 let (c, r) = self.world_to_cell(p);
-                if !self.in_bounds(c, r) { continue; }
+                if !self.in_bounds(c, r) {
+                    continue;
+                }
                 if self.blocked[self.idx(c as usize, r as usize)] {
                     return false;
                 }
@@ -151,8 +156,10 @@ impl ObstacleGrid {
             let a = window[0];
             let b = window[1];
             let horizontal = (a.y - b.y).abs() < 1e-6 && (a.x - b.x).abs() > 1e-6;
-            let vertical   = (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() > 1e-6;
-            if !horizontal && !vertical { continue; }
+            let vertical = (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() > 1e-6;
+            if !horizontal && !vertical {
+                continue;
+            }
             let dx = b.x - a.x;
             let dy = b.y - a.y;
             let len = (dx * dx + dy * dy).sqrt();
@@ -161,10 +168,16 @@ impl ObstacleGrid {
                 let t = i as f64 / steps as f64;
                 let p = Point::new(a.x + dx * t, a.y + dy * t);
                 let (c, r) = self.world_to_cell(p);
-                if !self.in_bounds(c, r) { continue; }
+                if !self.in_bounds(c, r) {
+                    continue;
+                }
                 let idx = self.idx(c as usize, r as usize);
-                if horizontal { self.wire_h[idx] = true; }
-                if vertical   { self.wire_v[idx] = true; }
+                if horizontal {
+                    self.wire_h[idx] = true;
+                }
+                if vertical {
+                    self.wire_v[idx] = true;
+                }
             }
         }
     }
@@ -172,14 +185,12 @@ impl ObstacleGrid {
 
 /// One-cell offset in world coordinates, in the pin's outward direction
 /// (after the component's rotation and mirror have been applied).
-fn pin_outward_offset(
-    dir: PinDirection, rotation: i32, mirrored: bool, cell_size: f64,
-) -> Point {
+fn pin_outward_offset(dir: PinDirection, rotation: i32, mirrored: bool, cell_size: f64) -> Point {
     let raw = match dir {
-        PinDirection::Left  => Point::new(-cell_size, 0.0),
-        PinDirection::Right => Point::new( cell_size, 0.0),
-        PinDirection::Up    => Point::new(0.0, -cell_size),
-        PinDirection::Down  => Point::new(0.0,  cell_size),
+        PinDirection::Left => Point::new(-cell_size, 0.0),
+        PinDirection::Right => Point::new(cell_size, 0.0),
+        PinDirection::Up => Point::new(0.0, -cell_size),
+        PinDirection::Down => Point::new(0.0, cell_size),
     };
     raw.transform(rotation, mirrored)
 }
@@ -197,7 +208,9 @@ pub fn build_grid(
     let mut grid = ObstacleGrid::new(bounds.0, bounds.1, cell_size);
 
     for comp in components {
-        let Some(sym) = symbols.get(&comp.symbol_name) else { continue; };
+        let Some(sym) = symbols.get(&comp.symbol_name) else {
+            continue;
+        };
 
         // Transformed bounding rect in world coords
         let base = sym.bounding_rect();
@@ -226,12 +239,10 @@ pub fn build_grid(
 
         // Pin tip cell + one cell outward stay reachable.
         for pin in &sym.pins {
-            let pin_world = comp.position
-                + pin.offset.transform(comp.rotation, comp.mirrored);
+            let pin_world = comp.position + pin.offset.transform(comp.rotation, comp.mirrored);
             grid.unblock_at(pin_world);
-            let outward = pin_outward_offset(
-                pin.direction, comp.rotation, comp.mirrored, cell_size,
-            );
+            let outward =
+                pin_outward_offset(pin.direction, comp.rotation, comp.mirrored, cell_size);
             grid.unblock_at(pin_world + outward);
         }
     }
@@ -240,7 +251,13 @@ pub fn build_grid(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Dir { None, Up, Down, Left, Right }
+enum Dir {
+    None,
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 #[derive(Clone, Copy)]
 struct Node {
@@ -251,11 +268,15 @@ struct Node {
 }
 
 impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool { self.f == other.f }
+    fn eq(&self, other: &Self) -> bool {
+        self.f == other.f
+    }
 }
 impl Eq for Node {}
 impl PartialOrd for Node {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -265,7 +286,13 @@ impl Ord for Node {
 }
 
 fn dir_idx(d: Dir) -> usize {
-    match d { Dir::None => 0, Dir::Up => 1, Dir::Down => 2, Dir::Left => 3, Dir::Right => 4 }
+    match d {
+        Dir::None => 0,
+        Dir::Up => 1,
+        Dir::Down => 2,
+        Dir::Left => 3,
+        Dir::Right => 4,
+    }
 }
 
 /// Grid-based A* with a bend penalty and a wire-aware crossing penalty.
@@ -281,8 +308,11 @@ fn dir_idx(d: Dir) -> usize {
 ///
 /// Returns `None` if either endpoint is out of bounds or no path exists.
 pub fn find_path(
-    grid: &ObstacleGrid, from: Point, to: Point,
-    bend_penalty: f64, crossing_penalty: f64,
+    grid: &ObstacleGrid,
+    from: Point,
+    to: Point,
+    bend_penalty: f64,
+    crossing_penalty: f64,
 ) -> Option<Vec<Point>> {
     let (sc, sr) = grid.world_to_cell(from);
     let (gc, gr) = grid.world_to_cell(to);
@@ -298,9 +328,7 @@ pub fn find_path(
 
     let n = grid.cols * grid.rows;
     let state_count = n * 5;
-    let state_idx = |c: usize, r: usize, d: Dir| -> usize {
-        (r * grid.cols + c) * 5 + dir_idx(d)
-    };
+    let state_idx = |c: usize, r: usize, d: Dir| -> usize { (r * grid.cols + c) * 5 + dir_idx(d) };
 
     let mut g_cost = vec![f64::INFINITY; state_count];
     let mut parent: Vec<Option<(u32, u32, u8)>> = vec![None; state_count];
@@ -308,13 +336,18 @@ pub fn find_path(
 
     let h0 = ((sc as i32 - gc as i32).abs() + (sr as i32 - gr as i32).abs()) as f64;
     g_cost[state_idx(sc, sr, Dir::None)] = 0.0;
-    heap.push(Node { col: sc, row: sr, dir: Dir::None, f: h0 });
+    heap.push(Node {
+        col: sc,
+        row: sr,
+        dir: Dir::None,
+        f: h0,
+    });
 
     let neighbors: [(Dir, i32, i32); 4] = [
-        (Dir::Up,    0, -1),
-        (Dir::Down,  0,  1),
-        (Dir::Left, -1,  0),
-        (Dir::Right, 1,  0),
+        (Dir::Up, 0, -1),
+        (Dir::Down, 0, 1),
+        (Dir::Left, -1, 0),
+        (Dir::Right, 1, 0),
     ];
 
     while let Some(node) = heap.pop() {
@@ -360,19 +393,27 @@ pub fn find_path(
         for &(d, dc, dr) in &neighbors {
             let nc = node.col as i32 + dc;
             let nr = node.row as i32 + dr;
-            if !grid.in_bounds(nc, nr) { continue; }
+            if !grid.in_bounds(nc, nr) {
+                continue;
+            }
             let (nc, nr) = (nc as usize, nr as usize);
             // Allow movement into the goal cell even if blocked (rare but
             // possible — the goal is always a pin cell, but inflation might
             // creep in).
-            if grid.is_blocked(nc, nr) && (nc, nr) != (gc, gr) { continue; }
+            if grid.is_blocked(nc, nr) && (nc, nr) != (gc, gr) {
+                continue;
+            }
 
-            let bend = if node.dir != Dir::None && node.dir != d { bend_penalty } else { 0.0 };
+            let bend = if node.dir != Dir::None && node.dir != d {
+                bend_penalty
+            } else {
+                0.0
+            };
             // Crossing penalty: stepping perpendicular through a cell that
             // already carries a wire of the orthogonal orientation creates a
             // visible crossing in the final schematic.
             let crosses = match d {
-                Dir::Up | Dir::Down    => grid.has_horizontal_wire(nc, nr),
+                Dir::Up | Dir::Down => grid.has_horizontal_wire(nc, nr),
                 Dir::Left | Dir::Right => grid.has_vertical_wire(nc, nr),
                 Dir::None => false,
             };
@@ -385,7 +426,12 @@ pub fn find_path(
                 g_cost[key] = new_g;
                 parent[key] = Some((node.col as u32, node.row as u32, dir_idx(node.dir) as u8));
                 let h = manhattan(nc, nr, gc, gr);
-                heap.push(Node { col: nc, row: nr, dir: d, f: new_g + h });
+                heap.push(Node {
+                    col: nc,
+                    row: nr,
+                    dir: d,
+                    f: new_g + h,
+                });
             }
         }
     }
@@ -400,7 +446,9 @@ fn manhattan(c: usize, r: usize, gc: usize, gr: usize) -> f64 {
 /// Drop interior points that lie on the line connecting their neighbors.
 /// Idempotent: simplify_path(simplify_path(p)) == simplify_path(p).
 pub fn simplify_path(pts: &[Point]) -> Vec<Point> {
-    if pts.len() < 3 { return pts.to_vec(); }
+    if pts.len() < 3 {
+        return pts.to_vec();
+    }
     let mut result: Vec<Point> = vec![pts[0]];
     for i in 1..pts.len() - 1 {
         let prev = *result.last().unwrap();
@@ -426,7 +474,9 @@ mod tests {
     use super::*;
     use crate::model::builtin_symbols;
 
-    fn p(x: f64, y: f64) -> Point { Point::new(x, y) }
+    fn p(x: f64, y: f64) -> Point {
+        Point::new(x, y)
+    }
 
     // ---- ObstacleGrid ----
 
@@ -514,21 +564,24 @@ mod tests {
         // (could be equal if no detour is feasible) and has at least as
         // many corners. Crucially, with a sufficiently high penalty it
         // takes a different route.
-        let len = |path: &[Point]| -> f64 {
-            path.windows(2).map(|w| w[0].distance_to(&w[1])).sum()
-        };
+        let len =
+            |path: &[Point]| -> f64 { path.windows(2).map(|w| w[0].distance_to(&w[1])).sum() };
         assert!(len(&with_pen) >= len(&no_pen));
         // The detour should leave the crossing cell behind: no segment of
         // with_pen should pass through (50, 50) crossing horizontally.
         let on_crossing_cell = with_pen.windows(2).any(|w| {
             // Vertical segment at x=50 covering y=50?
-            (w[0].x - 50.0).abs() < 1e-3 && (w[1].x - 50.0).abs() < 1e-3
+            (w[0].x - 50.0).abs() < 1e-3
+                && (w[1].x - 50.0).abs() < 1e-3
                 && ((w[0].y - 50.0).signum() != (w[1].y - 50.0).signum()
-                    || (w[0].y - 50.0).abs() < 1e-3 || (w[1].y - 50.0).abs() < 1e-3)
+                    || (w[0].y - 50.0).abs() < 1e-3
+                    || (w[1].y - 50.0).abs() < 1e-3)
         });
-        assert!(!on_crossing_cell,
+        assert!(
+            !on_crossing_cell,
             "penalized A* still routed straight through the crossing: {:?}",
-            with_pen);
+            with_pen
+        );
     }
 
     // ---- build_grid ----
@@ -551,15 +604,25 @@ mod tests {
         //  D at (0, -20) → world (100, 80)
         //  S at (0,  20) → world (100, 120)
         //  B at (10,  0) → world (110, 100)
-        for pin_world in [p(70.0, 100.0), p(100.0, 80.0), p(100.0, 120.0), p(110.0, 100.0)] {
+        for pin_world in [
+            p(70.0, 100.0),
+            p(100.0, 80.0),
+            p(100.0, 120.0),
+            p(110.0, 100.0),
+        ] {
             let (c, r) = g.world_to_cell(pin_world);
-            assert!(!g.is_blocked(c as usize, r as usize),
-                "pin cell {:?} should be reachable", pin_world);
+            assert!(
+                !g.is_blocked(c as usize, r as usize),
+                "pin cell {:?} should be reachable",
+                pin_world
+            );
         }
         // Body interior should be blocked
         let (c, r) = g.world_to_cell(p(95.0, 100.0));
-        assert!(g.is_blocked(c as usize, r as usize),
-            "interior of body should be blocked");
+        assert!(
+            g.is_blocked(c as usize, r as usize),
+            "interior of body should be blocked"
+        );
     }
 
     // ---- find_path ----
@@ -594,8 +657,11 @@ mod tests {
         // No path point should land on a blocked cell
         for pt in &path[1..path.len() - 1] {
             let (c, r) = g.world_to_cell(*pt);
-            assert!(!g.is_blocked(c as usize, r as usize),
-                "path goes through blocked cell at {:?}", pt);
+            assert!(
+                !g.is_blocked(c as usize, r as usize),
+                "path goes through blocked cell at {:?}",
+                pt
+            );
         }
     }
 

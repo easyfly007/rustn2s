@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use super::geometry::Point;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PowerType {

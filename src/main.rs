@@ -1,9 +1,12 @@
 use clap::Parser;
-use n2s::export::{svg, json, kicad};
+use n2s::export::{json, kicad, svg};
 use n2s::ConvertOptions;
 
 #[derive(Parser)]
-#[command(name = "n2s", about = "Netlist to Schematic — convert SPICE netlists to visual schematics")]
+#[command(
+    name = "n2s",
+    about = "Netlist to Schematic — convert SPICE netlists to visual schematics"
+)]
 struct Cli {
     /// Input SPICE netlist file
     input: String,
@@ -94,11 +97,10 @@ fn main() {
         hierarchical: cli.hierarchical,
     };
 
-    let spice_text = std::fs::read_to_string(&cli.input)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading {}: {}", cli.input, e);
-            std::process::exit(1);
-        });
+    let spice_text = std::fs::read_to_string(&cli.input).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", cli.input, e);
+        std::process::exit(1);
+    });
     let conv = match n2s::convert_full(&spice_text, &opts) {
         Ok(r) => r,
         Err(e) => {
@@ -121,7 +123,10 @@ fn main() {
         } else if output.ends_with(".kicad_sch") {
             kicad::render_to_file(schematic, output, &conv.subcircuit_symbols)
         } else {
-            Err(format!("Unknown output format: {}. Use .svg, .json, or .kicad_sch", output))
+            Err(format!(
+                "Unknown output format: {}. Use .svg, .json, or .kicad_sch",
+                output
+            ))
         };
 
         match result {

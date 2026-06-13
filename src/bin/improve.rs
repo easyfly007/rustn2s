@@ -1,16 +1,17 @@
 use clap::Parser;
-use serde::Serialize;
 use n2s::eval;
-use n2s::eval::score::{
-    self, compute_profile, ScoreBreakdown, ScoreWeights, TuningAdvice,
-};
+use n2s::eval::score::{self, compute_profile, ScoreBreakdown, ScoreWeights, TuningAdvice};
+use n2s::export::{json, svg};
 use n2s::model::Schematic;
 use n2s::parser::{ParseResult, SpiceParser};
 use n2s::ConvertOptions;
-use n2s::export::{svg, json};
+use serde::Serialize;
 
 #[derive(Parser)]
-#[command(name = "n2s-improve", about = "Iteratively improve schematic layout quality")]
+#[command(
+    name = "n2s-improve",
+    about = "Iteratively improve schematic layout quality"
+)]
 struct Cli {
     /// Input SPICE netlist file
     input: String,
@@ -94,7 +95,6 @@ struct Cli {
     #[arg(long)]
     lex_min: bool,
 }
-
 
 /// Parameters being tuned across iterations.
 #[derive(Debug, Clone, Serialize)]
@@ -199,9 +199,14 @@ fn optimize_from(
     let mut best_params = params.clone();
     let mut best_schematic: Option<Schematic> = None;
     let mut best_breakdown = ScoreBreakdown {
-        overall: 0.0, overlap_score: 0.0, crossings_score: 0.0,
-        aspect_ratio_score: 0.0, wire_length_score: 0.0,
-        label_ratio_score: 0.0, symmetry_score: 0.0, power_convention_score: 0.0,
+        overall: 0.0,
+        overlap_score: 0.0,
+        crossings_score: 0.0,
+        aspect_ratio_score: 0.0,
+        wire_length_score: 0.0,
+        label_ratio_score: 0.0,
+        symmetry_score: 0.0,
+        power_convention_score: 0.0,
     };
     let mut converged = false;
     let mut convergence_reason = String::new();
@@ -220,9 +225,12 @@ fn optimize_from(
         let report = eval::evaluate(parse_result, &schematic);
         let breakdown = score::compute_score(&report, weights);
         let advice = score::suggest_tuning(
-            &report, &breakdown,
-            params.layer_spacing, params.block_spacing,
-            params.device_spacing, params.label_threshold,
+            &report,
+            &breakdown,
+            params.layer_spacing,
+            params.block_spacing,
+            params.device_spacing,
+            params.label_threshold,
         );
 
         if let Some(prefix) = log_prefix {
@@ -235,8 +243,10 @@ fn optimize_from(
                 breakdown.power_convention_score,
             );
             for a in &advice {
-                eprintln!("  -> {} : {:.1} → {:.1} ({})",
-                    a.parameter, a.current_value, a.suggested_value, a.reason);
+                eprintln!(
+                    "  -> {} : {:.1} → {:.1} ({})",
+                    a.parameter, a.current_value, a.suggested_value, a.reason
+                );
             }
         }
 
@@ -249,7 +259,11 @@ fn optimize_from(
         //   default:   legacy weighted overall (still includes ar).
         let cmp_score = if cli.lex_min {
             let (safety, quality) = compute_profile(&report);
-            if safety.passes() { quality.worst_quality().1 } else { -1.0 }
+            if safety.passes() {
+                quality.worst_quality().1
+            } else {
+                -1.0
+            }
         } else {
             breakdown.overall
         };
@@ -278,7 +292,8 @@ fn optimize_from(
                 )
             } else {
                 format!(
-                    "Target score {:.3} reached at iteration {}", cli.target_score, iter,
+                    "Target score {:.3} reached at iteration {}",
+                    cli.target_score, iter,
                 )
             };
             break;
@@ -291,16 +306,18 @@ fn optimize_from(
         }
 
         if history.len() >= 3 {
-            let recent: Vec<f64> = history[history.len()-3..].iter()
-                .map(|r| r.score.overall).collect();
-            let max_diff = recent.windows(2)
+            let recent: Vec<f64> = history[history.len() - 3..]
+                .iter()
+                .map(|r| r.score.overall)
+                .collect();
+            let max_diff = recent
+                .windows(2)
                 .map(|w| (w[1] - w[0]).abs())
                 .fold(0.0f64, f64::max);
             if max_diff < 0.001 {
                 converged = true;
-                convergence_reason = format!(
-                    "Score stalled at {:.3} for 3 iterations", breakdown.overall,
-                );
+                convergence_reason =
+                    format!("Score stalled at {:.3} for 3 iterations", breakdown.overall,);
                 break;
             }
         }
@@ -335,7 +352,12 @@ fn optimize_from(
         convergence_reason,
     };
 
-    RestartResult { summary, history, best_schematic, best_breakdown }
+    RestartResult {
+        summary,
+        history,
+        best_schematic,
+        best_breakdown,
+    }
 }
 
 /// Generate `n` deterministic spaced parameter sets covering the param
@@ -350,14 +372,14 @@ fn generate_starting_points(initial: &TunableParams, n: usize) -> Vec<TunablePar
     // label_threshold so search can pick "absolute-only" vs "scaled by
     // bbox" regimes per circuit.
     const PRESETS: &[(f64, f64, f64, f64, f64)] = &[
-        (300.0, 100.0,  60.0,  450.0, 0.30),  // wider columns, smaller devices, default ratio
-        (100.0, 200.0, 100.0,  600.0, 0.50),  // narrow columns, more wire-friendly
-        (400.0, 150.0,  80.0,  300.0, 0.60),  // big spread, aggressive wire preference
-        (200.0,  60.0,  50.0,  900.0, 0.00),  // tight blocks, absolute threshold only
-        (150.0, 250.0,  60.0,  300.0, 0.40),  // narrow + tall blocks
-        (500.0, 100.0,  80.0, 1200.0, 0.30),  // very wide
-        (250.0, 120.0, 100.0,  500.0, 0.50),  // medium-everything alt
-        (100.0, 100.0,  60.0,  300.0, 0.30),  // compact in every dimension
+        (300.0, 100.0, 60.0, 450.0, 0.30), // wider columns, smaller devices, default ratio
+        (100.0, 200.0, 100.0, 600.0, 0.50), // narrow columns, more wire-friendly
+        (400.0, 150.0, 80.0, 300.0, 0.60), // big spread, aggressive wire preference
+        (200.0, 60.0, 50.0, 900.0, 0.00),  // tight blocks, absolute threshold only
+        (150.0, 250.0, 60.0, 300.0, 0.40), // narrow + tall blocks
+        (500.0, 100.0, 80.0, 1200.0, 0.30), // very wide
+        (250.0, 120.0, 100.0, 500.0, 0.50), // medium-everything alt
+        (100.0, 100.0, 60.0, 300.0, 0.30), // compact in every dimension
     ];
 
     for &(ls, bs, ds, lt, ar) in PRESETS.iter().take(n.saturating_sub(1)) {
@@ -375,10 +397,13 @@ fn generate_starting_points(initial: &TunableParams, n: usize) -> Vec<TunablePar
         let i = points.len() as f64;
         let last = points.last().unwrap().clone();
         points.push(TunableParams {
-            layer_spacing:  (last.layer_spacing  * (1.0 + 0.05 * (i % 3.0 - 1.0))).clamp(50.0, 1000.0),
-            block_spacing:  (last.block_spacing  * (1.0 + 0.05 * (i % 5.0 - 2.0))).clamp(30.0, 500.0),
-            device_spacing: (last.device_spacing * (1.0 + 0.05 * (i % 4.0 - 1.5))).clamp(30.0, 300.0),
-            label_threshold:(last.label_threshold* (1.0 + 0.05 * (i % 7.0 - 3.0))).clamp(100.0, 2000.0),
+            layer_spacing: (last.layer_spacing * (1.0 + 0.05 * (i % 3.0 - 1.0)))
+                .clamp(50.0, 1000.0),
+            block_spacing: (last.block_spacing * (1.0 + 0.05 * (i % 5.0 - 2.0))).clamp(30.0, 500.0),
+            device_spacing: (last.device_spacing * (1.0 + 0.05 * (i % 4.0 - 1.5)))
+                .clamp(30.0, 300.0),
+            label_threshold: (last.label_threshold * (1.0 + 0.05 * (i % 7.0 - 3.0)))
+                .clamp(100.0, 2000.0),
             adaptive_label_ratio: (last.adaptive_label_ratio + 0.1 * ((i % 6.0) - 3.0) / 3.0)
                 .clamp(0.0, 0.8),
         });
@@ -390,11 +415,10 @@ fn generate_starting_points(initial: &TunableParams, n: usize) -> Vec<TunablePar
 fn main() {
     let cli = Cli::parse();
 
-    let spice_text = std::fs::read_to_string(&cli.input)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading {}: {}", cli.input, e);
-            std::process::exit(1);
-        });
+    let spice_text = std::fs::read_to_string(&cli.input).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", cli.input, e);
+        std::process::exit(1);
+    });
     let parse_result = SpiceParser::new().parse(&spice_text);
     let weights = ScoreWeights::default();
 
@@ -418,9 +442,14 @@ fn main() {
     let mut global_best_params = user_params.clone();
     let mut global_best_schematic: Option<Schematic> = None;
     let mut global_best_breakdown = ScoreBreakdown {
-        overall: 0.0, overlap_score: 0.0, crossings_score: 0.0,
-        aspect_ratio_score: 0.0, wire_length_score: 0.0,
-        label_ratio_score: 0.0, symmetry_score: 0.0, power_convention_score: 0.0,
+        overall: 0.0,
+        overlap_score: 0.0,
+        crossings_score: 0.0,
+        aspect_ratio_score: 0.0,
+        wire_length_score: 0.0,
+        label_ratio_score: 0.0,
+        symmetry_score: 0.0,
+        power_convention_score: 0.0,
     };
     let mut initial_score = 0.0;
 
@@ -439,21 +468,32 @@ fn main() {
         if !cli.quiet && cli.search {
             eprintln!(
                 "[restart {}/{}] start: layer={:.0} block={:.0} device={:.0} label={:.0}",
-                restart_idx + 1, starting_points.len(),
-                start.layer_spacing, start.block_spacing,
-                start.device_spacing, start.label_threshold,
+                restart_idx + 1,
+                starting_points.len(),
+                start.layer_spacing,
+                start.block_spacing,
+                start.device_spacing,
+                start.label_threshold,
             );
         }
 
         let result = optimize_from(
-            restart_idx, start.clone(), &cli,
-            &spice_text, &parse_result, &weights, prefix_ref,
+            restart_idx,
+            start.clone(),
+            &cli,
+            &spice_text,
+            &parse_result,
+            &weights,
+            prefix_ref,
         );
 
         // Initial score is the very first iteration of the very first restart.
         if restart_idx == 0 {
-            initial_score = result.history.first()
-                .map(|r| r.score.overall).unwrap_or(0.0);
+            initial_score = result
+                .history
+                .first()
+                .map(|r| r.score.overall)
+                .unwrap_or(0.0);
         }
 
         if result.summary.best_score > global_best_score {
@@ -466,8 +506,10 @@ fn main() {
         if !cli.quiet && cli.search {
             eprintln!(
                 "[restart {}/{}] best={:.3} after {} iters ({})",
-                restart_idx + 1, starting_points.len(),
-                result.summary.best_score, result.summary.iterations,
+                restart_idx + 1,
+                starting_points.len(),
+                result.summary.best_score,
+                result.summary.iterations,
                 result.summary.convergence_reason,
             );
         }
@@ -480,7 +522,8 @@ fn main() {
             if !cli.quiet && cli.search {
                 eprintln!(
                     "Stopping early: target score {:.3} reached after restart {}",
-                    cli.target_score, restart_idx + 1,
+                    cli.target_score,
+                    restart_idx + 1,
                 );
             }
             break;
@@ -507,17 +550,19 @@ fn main() {
         }
     }
 
-    let converged = global_best_score >= cli.target_score
-        || all_summaries.iter().any(|s| s.converged);
+    let converged =
+        global_best_score >= cli.target_score || all_summaries.iter().any(|s| s.converged);
     let convergence_reason = if global_best_score >= cli.target_score {
         format!("Target score {:.3} reached", cli.target_score)
     } else if cli.search {
         format!(
             "Best across {} restarts: {:.3}",
-            all_summaries.len(), global_best_score,
+            all_summaries.len(),
+            global_best_score,
         )
     } else {
-        all_summaries.first()
+        all_summaries
+            .first()
             .map(|s| s.convergence_reason.clone())
             .unwrap_or_else(|| "no iterations run".to_string())
     };

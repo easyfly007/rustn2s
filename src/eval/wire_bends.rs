@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::model::Schematic;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct WireBendReport {
@@ -43,7 +43,9 @@ mod tests {
     #[test]
     fn straight_wire_has_no_bends() {
         // 2 points = 1 segment = 0 bends
-        let w = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
+        let w = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+        };
         let r = check(&schematic_with_wires(vec![w]));
         assert_eq!(r.total_bends, 0);
         assert_eq!(r.wires_with_bends, 0);
@@ -52,9 +54,13 @@ mod tests {
     #[test]
     fn l_shape_has_one_bend() {
         // 3 points = 1 bend
-        let w = Wire { points: vec![
-            Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0),
-        ] };
+        let w = Wire {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(10.0, 0.0),
+                Point::new(10.0, 10.0),
+            ],
+        };
         let r = check(&schematic_with_wires(vec![w]));
         assert_eq!(r.total_bends, 1);
         assert_eq!(r.wires_with_bends, 1);
@@ -63,11 +69,17 @@ mod tests {
 
     #[test]
     fn aggregates_across_wires_and_tracks_max() {
-        let straight = Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] };
-        let z_shape = Wire { points: vec![
-            Point::new(0.0, 0.0), Point::new(5.0, 0.0),
-            Point::new(5.0, 5.0), Point::new(10.0, 5.0),
-        ] }; // 2 bends
+        let straight = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+        };
+        let z_shape = Wire {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(5.0, 0.0),
+                Point::new(5.0, 5.0),
+                Point::new(10.0, 5.0),
+            ],
+        }; // 2 bends
         let r = check(&schematic_with_wires(vec![straight, z_shape]));
         assert_eq!(r.total_bends, 2);
         assert_eq!(r.wires_with_bends, 1);

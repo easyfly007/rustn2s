@@ -34,24 +34,21 @@ fn main() {
     let cli = Cli::parse();
 
     // Parse SPICE netlist
-    let spice_text = std::fs::read_to_string(&cli.netlist)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading netlist {}: {}", cli.netlist, e);
-            std::process::exit(1);
-        });
+    let spice_text = std::fs::read_to_string(&cli.netlist).unwrap_or_else(|e| {
+        eprintln!("Error reading netlist {}: {}", cli.netlist, e);
+        std::process::exit(1);
+    });
     let parse_result = SpiceParser::new().parse(&spice_text);
 
     // Load JSON schematic
-    let json_text = std::fs::read_to_string(&cli.schematic)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading schematic {}: {}", cli.schematic, e);
-            std::process::exit(1);
-        });
-    let schematic: Schematic = serde_json::from_str(&json_text)
-        .unwrap_or_else(|e| {
-            eprintln!("Error parsing schematic JSON: {}", e);
-            std::process::exit(1);
-        });
+    let json_text = std::fs::read_to_string(&cli.schematic).unwrap_or_else(|e| {
+        eprintln!("Error reading schematic {}: {}", cli.schematic, e);
+        std::process::exit(1);
+    });
+    let schematic: Schematic = serde_json::from_str(&json_text).unwrap_or_else(|e| {
+        eprintln!("Error parsing schematic JSON: {}", e);
+        std::process::exit(1);
+    });
 
     // Evaluate
     let report = eval::evaluate(&parse_result, &schematic);
@@ -66,9 +63,14 @@ fn main() {
         let breakdown = compute_score(&report, &weights);
         let quality_score = quality.quality_score(&weights);
         let circuit_name = std::path::Path::new(&cli.netlist)
-            .file_stem().and_then(|s| s.to_str()).unwrap_or("circuit");
-        let safety_str = if safety.passes() { "PASS".to_string() }
-                         else { format!("FAIL[{}]", safety.failures().join(",")) };
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("circuit");
+        let safety_str = if safety.passes() {
+            "PASS".to_string()
+        } else {
+            format!("FAIL[{}]", safety.failures().join(","))
+        };
         println!(
             "{circuit_name:<32} safety={safety_str} | shape={:.2} | cross={:.2} wire={:.2} lbl={:.2} → quality={:.3} | overall={:.3}",
             quality.aspect_ratio,

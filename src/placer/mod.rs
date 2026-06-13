@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use crate::parser::{SpiceDevice, SpiceParser};
-use crate::analyzer::{FunctionalBlock, BlockType};
+use crate::analyzer::{BlockType, FunctionalBlock};
 use crate::model::Point;
+use crate::parser::{SpiceDevice, SpiceParser};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct DevicePlacement {
@@ -72,13 +72,19 @@ impl SchematicPlacer {
     }
 
     pub fn place(
-        &self, blocks: &[FunctionalBlock], power_nets: &HashSet<String>, opts: &PlacerOptions,
+        &self,
+        blocks: &[FunctionalBlock],
+        power_nets: &HashSet<String>,
+        opts: &PlacerOptions,
     ) -> PlacementResult {
         self.place_with_devices(blocks, power_nets, opts, &[])
     }
 
     pub fn place_with_devices(
-        &self, blocks: &[FunctionalBlock], power_nets: &HashSet<String>, opts: &PlacerOptions,
+        &self,
+        blocks: &[FunctionalBlock],
+        power_nets: &HashSet<String>,
+        opts: &PlacerOptions,
         devices: &[SpiceDevice],
     ) -> PlacementResult {
         if blocks.is_empty() {
@@ -111,7 +117,8 @@ impl SchematicPlacer {
         }
 
         // 4. Block-internal layouts
-        let block_layouts: Vec<InternalLayout> = blocks.iter()
+        let block_layouts: Vec<InternalLayout> = blocks
+            .iter()
             .map(|b| Self::layout_block(b, devices, opts))
             .collect();
 
@@ -134,7 +141,8 @@ impl SchematicPlacer {
             // Advance x_cursor by the total width of this layer's grid
             let mut max_col_width = 0.0f64;
             for col_blocks in &cols {
-                let col_w = col_blocks.iter()
+                let col_w = col_blocks
+                    .iter()
                     .map(|&&bi| block_layouts[bi].width)
                     .fold(0.0f64, f64::max);
                 max_col_width += col_w + opts.layer_spacing;
@@ -150,7 +158,8 @@ impl SchematicPlacer {
             let mut col_x = base_x;
             for col_blocks in &cols {
                 let mut y_cursor = 0.0;
-                let col_width = col_blocks.iter()
+                let col_width = col_blocks
+                    .iter()
                     .map(|&&bi| block_layouts[bi].width)
                     .fold(0.0f64, f64::max);
 
@@ -184,8 +193,10 @@ impl SchematicPlacer {
         if !devices.is_empty() {
             Self::align_matched_pairs(&mut placements, blocks, devices, opts);
             // Recompute bounding rect after alignment
-            min_x = f64::MAX; min_y = f64::MAX;
-            max_x = f64::MIN; max_y = f64::MIN;
+            min_x = f64::MAX;
+            min_y = f64::MAX;
+            max_x = f64::MIN;
+            max_y = f64::MIN;
             for p in &placements {
                 min_x = min_x.min(p.position.x - 30.0);
                 min_y = min_y.min(p.position.y - 25.0);
@@ -208,7 +219,9 @@ impl SchematicPlacer {
     fn device_match_key(dev: &SpiceDevice) -> String {
         let sym_name = Self::symbol_for_device(dev);
         let mut key_parts = vec![sym_name];
-        let mut props: Vec<(&str, &str)> = dev.parameters.iter()
+        let mut props: Vec<(&str, &str)> = dev
+            .parameters
+            .iter()
             .filter(|(k, _)| matches!(k.as_str(), "W" | "L"))
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
@@ -262,33 +275,53 @@ impl SchematicPlacer {
         // symmetry pair.
         let mut match_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (di, dev) in devices.iter().enumerate() {
-            if matches!(dev.device_type, 'V' | 'I') { continue; }
+            if matches!(dev.device_type, 'V' | 'I') {
+                continue;
+            }
             let key = Self::device_match_key(dev);
             match_groups.entry(key).or_default().push(di);
         }
 
         // For groups of exactly 2, align y-coordinates if in different blocks
         for group in match_groups.values() {
-            if group.len() != 2 { continue; }
+            if group.len() != 2 {
+                continue;
+            }
 
             let di_a = group[0];
             let di_b = group[1];
 
-            let block_a = match dev_to_block.get(&di_a) { Some(&b) => b, None => continue };
-            let block_b = match dev_to_block.get(&di_b) { Some(&b) => b, None => continue };
+            let block_a = match dev_to_block.get(&di_a) {
+                Some(&b) => b,
+                None => continue,
+            };
+            let block_b = match dev_to_block.get(&di_b) {
+                Some(&b) => b,
+                None => continue,
+            };
 
             // Skip if same block (already handled by block template)
-            if block_a == block_b { continue; }
+            if block_a == block_b {
+                continue;
+            }
 
-            let pi_a = match dev_to_placement.get(&di_a) { Some(&p) => p, None => continue };
-            let pi_b = match dev_to_placement.get(&di_b) { Some(&p) => p, None => continue };
+            let pi_a = match dev_to_placement.get(&di_a) {
+                Some(&p) => p,
+                None => continue,
+            };
+            let pi_b = match dev_to_placement.get(&di_b) {
+                Some(&p) => p,
+                None => continue,
+            };
 
             let y_a = placements[pi_a].position.y;
             let y_b = placements[pi_b].position.y;
             let y_diff = (y_a - y_b).abs();
 
             // Only align if they're at meaningfully different y positions
-            if y_diff < opts.grid_size { continue; }
+            if y_diff < opts.grid_size {
+                continue;
+            }
 
             // Determine which block to move (prefer moving the smaller block)
             let size_a = blocks[block_a].device_indices.len();
@@ -306,7 +339,9 @@ impl SchematicPlacer {
             // Compute the delta to align the moving device with the anchor's y
             let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
 
-            if dy.abs() < opts.grid_size { continue; }
+            if dy.abs() < opts.grid_size {
+                continue;
+            }
 
             // Shift all devices in the moving block by dy
             for &di in &blocks[move_block].device_indices {
@@ -355,14 +390,16 @@ impl SchematicPlacer {
                 }
             }
             match (has_pmos, has_nmos) {
-                (true, false) => 0,  // PMOS → top
-                (false, true) => 2,  // NMOS → bottom
-                _ => 1,              // mixed or passive → middle
+                (true, false) => 0, // PMOS → top
+                (false, true) => 2, // NMOS → bottom
+                _ => 1,             // mixed or passive → middle
             }
         };
 
         for layer in layers.iter_mut() {
-            if layer.len() <= 1 { continue; }
+            if layer.len() <= 1 {
+                continue;
+            }
             // Stable sort preserves crossing-minimized order within same polarity
             layer.sort_by_key(|&bi| classify_block(&blocks[bi]));
         }
@@ -387,19 +424,22 @@ impl SchematicPlacer {
         }
 
         // Compute total height if all blocks were in one column
-        let total_height: f64 = layer.iter()
+        let total_height: f64 = layer
+            .iter()
             .map(|&bi| block_layouts[bi].height + opts.inter_block_spacing)
             .sum();
 
         // Compute max block width (gives us the column width)
-        let max_block_width: f64 = layer.iter()
+        let max_block_width: f64 = layer
+            .iter()
             .map(|&bi| block_layouts[bi].width)
             .fold(60.0f64, f64::max);
 
         // Target: aspect ratio close to 1.5 (slightly wider than tall).
         // num_cols = ceil(sqrt(total_height / (target_ratio * col_width)))
         let target_ratio = 1.5;
-        let ideal_cols = (total_height / (target_ratio * (max_block_width + opts.layer_spacing))).sqrt();
+        let ideal_cols =
+            (total_height / (target_ratio * (max_block_width + opts.layer_spacing))).sqrt();
         let num_cols = (ideal_cols.ceil() as usize).max(1).min(layer.len());
 
         if num_cols <= 1 {
@@ -413,7 +453,8 @@ impl SchematicPlacer {
 
         for bi in layer {
             // Find the column with minimum height
-            let min_col = col_heights.iter()
+            let min_col = col_heights
+                .iter()
                 .enumerate()
                 .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .map(|(i, _)| i)
@@ -450,7 +491,9 @@ impl SchematicPlacer {
         let mut edge_set: HashSet<(usize, usize)> = HashSet::new();
         for (i, b) in blocks.iter().enumerate() {
             for net in &b.input_nets {
-                if power_nets.contains(&net.to_lowercase()) { continue; }
+                if power_nets.contains(&net.to_lowercase()) {
+                    continue;
+                }
                 if let Some(producers) = net_producers.get(net) {
                     for &j in producers {
                         if j != i && !edge_set.contains(&(j, i)) {
@@ -464,19 +507,26 @@ impl SchematicPlacer {
             }
         }
 
-
         // Cycle removal via DFS
         #[derive(Clone, Copy, PartialEq)]
-        enum Color { White, Gray, Black }
+        enum Color {
+            White,
+            Gray,
+            Black,
+        }
         let mut color = vec![Color::White; n];
         let mut back_edges: HashSet<usize> = HashSet::new();
 
         fn dfs(u: usize, color: &mut [Color], edges: &[(usize, usize)], back: &mut HashSet<usize>) {
             color[u] = Color::Gray;
             for (idx, &(from, to)) in edges.iter().enumerate() {
-                if from != u { continue; }
+                if from != u {
+                    continue;
+                }
                 match color[to] {
-                    Color::Gray => { back.insert(idx); }
+                    Color::Gray => {
+                        back.insert(idx);
+                    }
                     Color::White => dfs(to, color, edges, back),
                     Color::Black => {}
                 }
@@ -500,7 +550,12 @@ impl SchematicPlacer {
             radj[from].push(to);
         }
 
-        BlockGraph { node_count: n, adj, radj, edges }
+        BlockGraph {
+            node_count: n,
+            adj,
+            radj,
+            edges,
+        }
     }
 
     // ========================================================================
@@ -517,7 +572,9 @@ impl SchematicPlacer {
 
         let mut queue: VecDeque<usize> = VecDeque::new();
         for (i, &deg) in in_deg.iter().enumerate() {
-            if deg == 0 { queue.push_back(i); }
+            if deg == 0 {
+                queue.push_back(i);
+            }
         }
 
         let mut topo = Vec::with_capacity(n);
@@ -525,7 +582,9 @@ impl SchematicPlacer {
             topo.push(u);
             for &v in &graph.adj[u] {
                 in_deg[v] -= 1;
-                if in_deg[v] == 0 { queue.push_back(v); }
+                if in_deg[v] == 0 {
+                    queue.push_back(v);
+                }
             }
         }
 
@@ -533,7 +592,9 @@ impl SchematicPlacer {
         if topo.len() < n {
             let visited: HashSet<usize> = topo.iter().copied().collect();
             for i in 0..n {
-                if !visited.contains(&i) { topo.push(i); }
+                if !visited.contains(&i) {
+                    topo.push(i);
+                }
             }
         }
 
@@ -562,9 +623,13 @@ impl SchematicPlacer {
     /// layer, which would create long backward-looking connections.
     fn enforce_signal_flow(layers: &mut [usize], graph: &BlockGraph) {
         let n = graph.node_count;
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
         let max_layer = *layers.iter().max().unwrap_or(&0);
-        if max_layer == 0 { return; }
+        if max_layer == 0 {
+            return;
+        }
 
         let mut has_in = vec![false; n];
         let mut has_out = vec![false; n];
@@ -587,8 +652,10 @@ impl SchematicPlacer {
         loop {
             let mut changed = false;
             for u in 0..n {
-                if !has_out[u] { continue; } // sink: stays at max_layer
-                // For each successor, constrain alap[u] <= alap[s] - 1
+                if !has_out[u] {
+                    continue;
+                } // sink: stays at max_layer
+                  // For each successor, constrain alap[u] <= alap[s] - 1
                 let mut new_layer = max_layer;
                 for &s in &graph.adj[u] {
                     if alap[s] == 0 {
@@ -604,7 +671,9 @@ impl SchematicPlacer {
                     changed = true;
                 }
             }
-            if !changed { break; }
+            if !changed {
+                break;
+            }
         }
 
         // Final layer: for non-isolated blocks, use max(ASAP, ALAP). Since
@@ -614,10 +683,14 @@ impl SchematicPlacer {
         //
         // Isolated blocks (no edges) are untouched.
         for i in 0..n {
-            if !has_in[i] && !has_out[i] { continue; }
+            if !has_in[i] && !has_out[i] {
+                continue;
+            }
             // Pure signal sources (no in-edges) stay at ASAP to keep inputs
             // anchored on the left.
-            if !has_in[i] { continue; }
+            if !has_in[i] {
+                continue;
+            }
             if alap[i] > layers[i] {
                 layers[i] = alap[i];
             }
@@ -641,14 +714,18 @@ impl SchematicPlacer {
         }
 
         for i in 0..n {
-            if has_edges[i] { continue; }
+            if has_edges[i] {
+                continue;
+            }
 
             // Find non-isolated block sharing the most nets
             let mut best_target: Option<usize> = None;
             let mut best_shared = 0usize;
 
             for j in 0..n {
-                if i == j || !has_edges[j] { continue; }
+                if i == j || !has_edges[j] {
+                    continue;
+                }
                 let shared = blocks[i].all_nets.intersection(&blocks[j].all_nets).count();
                 if shared > best_shared {
                     best_shared = shared;
@@ -668,11 +745,15 @@ impl SchematicPlacer {
     // ========================================================================
 
     fn minimize_crossings(layers: &mut [Vec<usize>], graph: &BlockGraph, iterations: usize) {
-        if layers.len() <= 1 { return; }
+        if layers.len() <= 1 {
+            return;
+        }
 
         let mut node_layer: HashMap<usize, usize> = HashMap::new();
         for (l, layer) in layers.iter().enumerate() {
-            for &n in layer { node_layer.insert(n, l); }
+            for &n in layer {
+                node_layer.insert(n, l);
+            }
         }
 
         let position_in_layer = |node: usize, layer: &[usize]| -> f64 {
@@ -683,14 +764,22 @@ impl SchematicPlacer {
             // Forward sweep
             for l in 1..layers.len() {
                 let prev = layers[l - 1].clone();
-                let mut bary: Vec<(f64, usize)> = layers[l].iter().map(|&node| {
-                    let preds: Vec<f64> = graph.radj[node].iter()
-                        .filter(|&&p| node_layer.get(&p) == Some(&(l - 1)))
-                        .map(|&p| position_in_layer(p, &prev))
-                        .collect();
-                    let bc = if preds.is_empty() { node as f64 } else { preds.iter().sum::<f64>() / preds.len() as f64 };
-                    (bc, node)
-                }).collect();
+                let mut bary: Vec<(f64, usize)> = layers[l]
+                    .iter()
+                    .map(|&node| {
+                        let preds: Vec<f64> = graph.radj[node]
+                            .iter()
+                            .filter(|&&p| node_layer.get(&p) == Some(&(l - 1)))
+                            .map(|&p| position_in_layer(p, &prev))
+                            .collect();
+                        let bc = if preds.is_empty() {
+                            node as f64
+                        } else {
+                            preds.iter().sum::<f64>() / preds.len() as f64
+                        };
+                        (bc, node)
+                    })
+                    .collect();
                 bary.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
                 layers[l] = bary.into_iter().map(|(_, n)| n).collect();
             }
@@ -698,14 +787,22 @@ impl SchematicPlacer {
             // Backward sweep
             for l in (0..layers.len() - 1).rev() {
                 let next = layers[l + 1].clone();
-                let mut bary: Vec<(f64, usize)> = layers[l].iter().map(|&node| {
-                    let succs: Vec<f64> = graph.adj[node].iter()
-                        .filter(|&&s| node_layer.get(&s) == Some(&(l + 1)))
-                        .map(|&s| position_in_layer(s, &next))
-                        .collect();
-                    let bc = if succs.is_empty() { node as f64 } else { succs.iter().sum::<f64>() / succs.len() as f64 };
-                    (bc, node)
-                }).collect();
+                let mut bary: Vec<(f64, usize)> = layers[l]
+                    .iter()
+                    .map(|&node| {
+                        let succs: Vec<f64> = graph.adj[node]
+                            .iter()
+                            .filter(|&&s| node_layer.get(&s) == Some(&(l + 1)))
+                            .map(|&s| position_in_layer(s, &next))
+                            .collect();
+                        let bc = if succs.is_empty() {
+                            node as f64
+                        } else {
+                            succs.iter().sum::<f64>() / succs.len() as f64
+                        };
+                        (bc, node)
+                    })
+                    .collect();
                 bary.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
                 layers[l] = bary.into_iter().map(|(_, n)| n).collect();
             }
@@ -717,7 +814,9 @@ impl SchematicPlacer {
     // ========================================================================
 
     fn layout_block(
-        block: &FunctionalBlock, all_devices: &[SpiceDevice], opts: &PlacerOptions,
+        block: &FunctionalBlock,
+        all_devices: &[SpiceDevice],
+        opts: &PlacerOptions,
     ) -> InternalLayout {
         let sp = opts.intra_block_spacing;
         let devices = &block.device_indices;
@@ -726,15 +825,39 @@ impl SchematicPlacer {
             BlockType::DiffPair => {
                 let mut placements = Vec::new();
                 if devices.len() >= 2 {
-                    placements.push((devices[0], String::new(), Point::new(-sp / 2.0, 0.0), 0, false));
-                    placements.push((devices[1], String::new(), Point::new(sp / 2.0, 0.0), 0, false));
+                    placements.push((
+                        devices[0],
+                        String::new(),
+                        Point::new(-sp / 2.0, 0.0),
+                        0,
+                        false,
+                    ));
+                    placements.push((
+                        devices[1],
+                        String::new(),
+                        Point::new(sp / 2.0, 0.0),
+                        0,
+                        false,
+                    ));
                     if devices.len() >= 3 {
                         placements.push((devices[2], String::new(), Point::new(0.0, sp), 0, false));
-                        return InternalLayout { placements, width: sp + 60.0, height: sp + 40.0 };
+                        return InternalLayout {
+                            placements,
+                            width: sp + 60.0,
+                            height: sp + 40.0,
+                        };
                     }
-                    return InternalLayout { placements, width: sp + 60.0, height: 40.0 };
+                    return InternalLayout {
+                        placements,
+                        width: sp + 60.0,
+                        height: 40.0,
+                    };
                 }
-                InternalLayout { placements, width: 60.0, height: 40.0 }
+                InternalLayout {
+                    placements,
+                    width: 60.0,
+                    height: 40.0,
+                }
             }
             BlockType::CurrentMirror => {
                 let mut placements = Vec::new();
@@ -743,8 +866,16 @@ impl SchematicPlacer {
                     placements.push((idx, String::new(), Point::new(x, 0.0), 0, false));
                     x += sp;
                 }
-                let w = if devices.len() > 1 { (devices.len() - 1) as f64 * sp + 60.0 } else { 60.0 };
-                InternalLayout { placements, width: w, height: 40.0 }
+                let w = if devices.len() > 1 {
+                    (devices.len() - 1) as f64 * sp + 60.0
+                } else {
+                    60.0
+                };
+                InternalLayout {
+                    placements,
+                    width: w,
+                    height: 40.0,
+                }
             }
             BlockType::CascodePair => {
                 let mut placements = Vec::new();
@@ -752,7 +883,11 @@ impl SchematicPlacer {
                     placements.push((devices[0], String::new(), Point::new(0.0, 0.0), 0, false));
                     placements.push((devices[1], String::new(), Point::new(0.0, sp), 0, false));
                 }
-                InternalLayout { placements, width: 60.0, height: sp + 40.0 }
+                InternalLayout {
+                    placements,
+                    width: 60.0,
+                    height: sp + 40.0,
+                }
             }
             BlockType::Inverter => {
                 // PMOS first (mirrored), NMOS second
@@ -761,11 +896,19 @@ impl SchematicPlacer {
                     placements.push((devices[0], String::new(), Point::new(0.0, 0.0), 0, true)); // PMOS mirrored
                     placements.push((devices[1], String::new(), Point::new(0.0, sp), 0, false));
                 }
-                InternalLayout { placements, width: 60.0, height: sp + 40.0 }
+                InternalLayout {
+                    placements,
+                    width: 60.0,
+                    height: sp + 40.0,
+                }
             }
             BlockType::SingleDevice => {
                 let placements = vec![(devices[0], String::new(), Point::new(0.0, 0.0), 0, false)];
-                InternalLayout { placements, width: 60.0, height: 40.0 }
+                InternalLayout {
+                    placements,
+                    width: 60.0,
+                    height: 40.0,
+                }
             }
             BlockType::Unknown => {
                 // Group block members by match key. Members whose key appears
@@ -782,8 +925,16 @@ impl SchematicPlacer {
                         placements.push((idx, String::new(), Point::new(0.0, y), 0, false));
                         y += sp;
                     }
-                    let h = if devices.len() > 1 { (devices.len() - 1) as f64 * sp + 40.0 } else { 40.0 };
-                    return InternalLayout { placements, width: 60.0, height: h };
+                    let h = if devices.len() > 1 {
+                        (devices.len() - 1) as f64 * sp + 40.0
+                    } else {
+                        40.0
+                    };
+                    return InternalLayout {
+                        placements,
+                        width: 60.0,
+                        height: h,
+                    };
                 }
 
                 // First pass: compute a match key per device, preserving the
@@ -819,7 +970,9 @@ impl SchematicPlacer {
                     let mut has_p = false;
                     let mut has_n = false;
                     for &di in &key_groups[key] {
-                        if di >= all_devices.len() { continue; }
+                        if di >= all_devices.len() {
+                            continue;
+                        }
                         let sym = Self::symbol_for_device(&all_devices[di]);
                         match sym.as_str() {
                             "pmos4" | "pnp" => has_p = true,
@@ -844,10 +997,20 @@ impl SchematicPlacer {
                     let group = &key_groups[key];
                     if group.len() == 2 {
                         // Matched pair → horizontal split
-                        placements.push((group[0], String::new(),
-                            Point::new(-sp / 2.0, y), 0, false));
-                        placements.push((group[1], String::new(),
-                            Point::new( sp / 2.0, y), 0, false));
+                        placements.push((
+                            group[0],
+                            String::new(),
+                            Point::new(-sp / 2.0, y),
+                            0,
+                            false,
+                        ));
+                        placements.push((
+                            group[1],
+                            String::new(),
+                            Point::new(sp / 2.0, y),
+                            0,
+                            false,
+                        ));
                         emitted.insert(group[0]);
                         emitted.insert(group[1]);
                         max_width = max_width.max(sp + 60.0);
@@ -871,7 +1034,11 @@ impl SchematicPlacer {
                 }
 
                 let h = (y - sp).max(0.0) + 40.0;
-                InternalLayout { placements, width: max_width, height: h }
+                InternalLayout {
+                    placements,
+                    width: max_width,
+                    height: h,
+                }
             }
         }
     }
@@ -935,7 +1102,10 @@ mod tests {
             "* subckt\n\
              X1 a b VDD VSS INV\n",
         );
-        assert_eq!(SchematicPlacer::symbol_for_device(&devices[0]), "subckt_INV");
+        assert_eq!(
+            SchematicPlacer::symbol_for_device(&devices[0]),
+            "subckt_INV"
+        );
     }
 
     #[test]
@@ -960,9 +1130,8 @@ mod tests {
         let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
 
         let placer = SchematicPlacer;
-        let result = placer.place_with_devices(
-            &blocks, &power_nets, &PlacerOptions::default(), &pr.devices,
-        );
+        let result =
+            placer.place_with_devices(&blocks, &power_nets, &PlacerOptions::default(), &pr.devices);
         assert_eq!(result.placements.len(), 2);
 
         let mut pmos_y = None;
@@ -981,8 +1150,12 @@ mod tests {
         }
         let pmos_y = pmos_y.expect("PMOS missing");
         let nmos_y = nmos_y.expect("NMOS missing");
-        assert!(pmos_y < nmos_y,
-            "PMOS y ({}) should be < NMOS y ({})", pmos_y, nmos_y);
+        assert!(
+            pmos_y < nmos_y,
+            "PMOS y ({}) should be < NMOS y ({})",
+            pmos_y,
+            nmos_y
+        );
     }
 
     #[test]
@@ -997,14 +1170,25 @@ mod tests {
         let power_nets = analyzer.identify_power_nets(&pr.devices);
         let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
 
-        let opts = PlacerOptions { grid_size: 10.0, ..Default::default() };
+        let opts = PlacerOptions {
+            grid_size: 10.0,
+            ..Default::default()
+        };
         let placer = SchematicPlacer;
         let result = placer.place_with_devices(&blocks, &power_nets, &opts, &pr.devices);
         for dp in &result.placements {
-            assert_eq!(dp.position.x, (dp.position.x / 10.0).round() * 10.0,
-                "x not on grid: {}", dp.position.x);
-            assert_eq!(dp.position.y, (dp.position.y / 10.0).round() * 10.0,
-                "y not on grid: {}", dp.position.y);
+            assert_eq!(
+                dp.position.x,
+                (dp.position.x / 10.0).round() * 10.0,
+                "x not on grid: {}",
+                dp.position.x
+            );
+            assert_eq!(
+                dp.position.y,
+                (dp.position.y / 10.0).round() * 10.0,
+                "y not on grid: {}",
+                dp.position.y
+            );
         }
     }
 }

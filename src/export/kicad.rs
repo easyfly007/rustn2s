@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::model::{
-    Point, Schematic, Component, PowerSymbol, PowerType,
-    SymbolDef, SymbolPin, SymbolGraphic, PinDirection, builtin_symbols,
+    builtin_symbols, Component, PinDirection, Point, PowerSymbol, PowerType, Schematic, SymbolDef,
+    SymbolGraphic, SymbolPin,
 };
 
 const SCALE: f64 = 0.254;
@@ -115,10 +115,7 @@ fn compute_offset(schematic: &Schematic, symbols: &HashMap<String, SymbolDef>) -
 
     let cx = (min_x + max_x) / 2.0;
     let cy = (min_y + max_y) / 2.0;
-    Point::new(
-        A4_WIDTH / 2.0 - sc(cx),
-        A4_HEIGHT / 2.0 - sc(cy),
-    )
+    Point::new(A4_WIDTH / 2.0 - sc(cx), A4_HEIGHT / 2.0 - sc(cy))
 }
 
 fn xy(p: Point, off: Point) -> (String, String) {
@@ -136,7 +133,13 @@ fn emit_graphic(g: &SymbolGraphic, out: &mut String) {
                 "      (polyline (pts (xy {} {}) (xy {} {})) (stroke (width 0) (type default)) (fill (type none)))",
                 fmt2(sc(*x1)), fmt2(sc(*y1)), fmt2(sc(*x2)), fmt2(sc(*y2)));
         }
-        SymbolGraphic::Rect { x, y, width, height, filled } => {
+        SymbolGraphic::Rect {
+            x,
+            y,
+            width,
+            height,
+            filled,
+        } => {
             let fill = if *filled { "background" } else { "none" };
             let _ = writeln!(out,
                 "      (rectangle (start {} {}) (end {} {}) (stroke (width 0) (type default)) (fill (type {})))",
@@ -144,13 +147,24 @@ fn emit_graphic(g: &SymbolGraphic, out: &mut String) {
                 fmt2(sc(x + width)), fmt2(sc(y + height)),
                 fill);
         }
-        SymbolGraphic::Circle { cx, cy, radius, filled } => {
+        SymbolGraphic::Circle {
+            cx,
+            cy,
+            radius,
+            filled,
+        } => {
             let fill = if *filled { "background" } else { "none" };
             let _ = writeln!(out,
                 "      (circle (center {} {}) (radius {}) (stroke (width 0) (type default)) (fill (type {})))",
                 fmt2(sc(*cx)), fmt2(sc(*cy)), fmt2(sc(*radius)), fill);
         }
-        SymbolGraphic::Arc { cx, cy, radius, start_angle, span_angle } => {
+        SymbolGraphic::Arc {
+            cx,
+            cy,
+            radius,
+            start_angle,
+            span_angle,
+        } => {
             let r = *radius;
             let sa = start_angle.to_radians();
             let ea = (start_angle + span_angle).to_radians();
@@ -173,15 +187,29 @@ fn emit_graphic(g: &SymbolGraphic, out: &mut String) {
             for p in points {
                 let _ = write!(pts, "(xy {} {}) ", fmt2(sc(p.x)), fmt2(sc(p.y)));
             }
-            let _ = writeln!(out,
+            let _ = writeln!(
+                out,
                 "      (polyline (pts {}) (stroke (width 0) (type default)) (fill (type {})))",
-                pts.trim(), fill);
+                pts.trim(),
+                fill
+            );
         }
-        SymbolGraphic::Text { x, y, text, font_size } => {
+        SymbolGraphic::Text {
+            x,
+            y,
+            text,
+            font_size,
+        } => {
             let sz = sc(*font_size).max(1.0);
-            let _ = writeln!(out,
+            let _ = writeln!(
+                out,
                 "      (text \"{}\" (at {} {}) (effects (font (size {} {}))))",
-                text, fmt2(sc(*x)), fmt2(sc(*y)), fmt2(sz), fmt2(sz));
+                text,
+                fmt2(sc(*x)),
+                fmt2(sc(*y)),
+                fmt2(sz),
+                fmt2(sz)
+            );
         }
     }
 }
@@ -201,12 +229,26 @@ fn emit_lib_symbol(sym: &SymbolDef, out: &mut String) {
     let _ = writeln!(out, "      (pin_names (offset 0))");
     let _ = writeln!(out, "      (in_bom yes)");
     let _ = writeln!(out, "      (on_board yes)");
-    let _ = writeln!(out, "      (property \"Reference\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
-        prefix, fmt2(sc(-25.0)));
-    let _ = writeln!(out, "      (property \"Value\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
-        sym.name, fmt2(sc(25.0)));
-    let _ = writeln!(out, "      (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
-    let _ = writeln!(out, "      (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
+    let _ = writeln!(
+        out,
+        "      (property \"Reference\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
+        prefix,
+        fmt2(sc(-25.0))
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Value\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
+        sym.name,
+        fmt2(sc(25.0))
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
 
     // Graphics sub-symbol
     let _ = writeln!(out, "      (symbol \"{}_0_1\"", lib_id);
@@ -236,12 +278,27 @@ fn emit_power_lib_symbol(net_name: &str, power_type: PowerType, out: &mut String
     let _ = writeln!(out, "      (pin_names (offset 0))");
     let _ = writeln!(out, "      (in_bom yes)");
     let _ = writeln!(out, "      (on_board yes)");
-    let _ = writeln!(out, "      (property \"Reference\" \"#PWR\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
-    let _ = writeln!(out, "      (property \"Value\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
+    let _ = writeln!(
+        out,
+        "      (property \"Reference\" \"#PWR\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Value\" \"{}\" (at 0 {} 0) (effects (font (size 1.27 1.27))))",
         net_name,
-        match power_type { PowerType::GND => "3.81", _ => "-3.81" });
-    let _ = writeln!(out, "      (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
-    let _ = writeln!(out, "      (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
+        match power_type {
+            PowerType::GND => "3.81",
+            _ => "-3.81",
+        }
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
+    let _ = writeln!(
+        out,
+        "      (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
 
     let _ = writeln!(out, "      (symbol \"{}_0_1\"", lib_id);
     match power_type {
@@ -278,12 +335,7 @@ fn emit_power_lib_symbol(net_name: &str, power_type: PowerType, out: &mut String
 // Schematic body
 // ---------------------------------------------------------------------------
 
-fn emit_symbol_instance(
-    comp: &Component,
-    off: Point,
-    uuid: &mut UuidGen,
-    out: &mut String,
-) {
+fn emit_symbol_instance(comp: &Component, off: Point, uuid: &mut UuidGen, out: &mut String) {
     let lib_id = format!("n2s:{}", comp.symbol_name);
     let angle = n2s_rotation_to_kicad(comp.rotation);
     let (cx, cy) = xy(comp.position, off);
@@ -300,19 +352,33 @@ fn emit_symbol_instance(
 
     // Reference property
     let ref_y = sc(comp.position.y) + off.y - 5.0;
-    let _ = writeln!(out,
+    let _ = writeln!(
+        out,
         "    (property \"Reference\" \"{}\" (at {} {} 0) (effects (font (size 1.27 1.27))))",
-        comp.instance_name, cx, fmt2(ref_y));
+        comp.instance_name,
+        cx,
+        fmt2(ref_y)
+    );
 
     // Value property
     let value = extract_value(comp);
     let val_y = sc(comp.position.y) + off.y + 5.0;
-    let _ = writeln!(out,
+    let _ = writeln!(
+        out,
         "    (property \"Value\" \"{}\" (at {} {} 0) (effects (font (size 1.27 1.27))))",
-        value, cx, fmt2(val_y));
+        value,
+        cx,
+        fmt2(val_y)
+    );
 
-    let _ = writeln!(out, "    (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
-    let _ = writeln!(out, "    (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
+    let _ = writeln!(
+        out,
+        "    (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
+    let _ = writeln!(
+        out,
+        "    (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
     let _ = writeln!(out, "  )");
 }
 
@@ -354,11 +420,21 @@ fn emit_power_instance(
         PowerType::GND => sc(ps.position.y) + off.y + 3.81,
         _ => sc(ps.position.y) + off.y - 3.81,
     };
-    let _ = writeln!(out,
+    let _ = writeln!(
+        out,
         "    (property \"Value\" \"{}\" (at {} {} 0) (effects (font (size 1.27 1.27))))",
-        ps.net_name, px, fmt2(vy));
-    let _ = writeln!(out, "    (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
-    let _ = writeln!(out, "    (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))");
+        ps.net_name,
+        px,
+        fmt2(vy)
+    );
+    let _ = writeln!(
+        out,
+        "    (property \"Footprint\" \"\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
+    let _ = writeln!(
+        out,
+        "    (property \"Datasheet\" \"~\" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))"
+    );
     let _ = writeln!(out, "  )");
 }
 
@@ -377,18 +453,27 @@ fn emit_wires(schematic: &Schematic, off: Point, uuid: &mut UuidGen, out: &mut S
 fn emit_labels(schematic: &Schematic, off: Point, uuid: &mut UuidGen, out: &mut String) {
     for label in &schematic.labels {
         let (lx, ly) = xy(label.position, off);
-        let _ = writeln!(out,
+        let _ = writeln!(
+            out,
             "  (label \"{}\" (at {} {} 0) (effects (font (size 1.27 1.27))) (uuid \"{}\"))",
-            label.name, lx, ly, uuid.next());
+            label.name,
+            lx,
+            ly,
+            uuid.next()
+        );
     }
 }
 
 fn emit_junctions(schematic: &Schematic, off: Point, uuid: &mut UuidGen, out: &mut String) {
     for junc in &schematic.junctions {
         let (jx, jy) = xy(junc.position, off);
-        let _ = writeln!(out,
+        let _ = writeln!(
+            out,
             "  (junction (at {} {}) (diameter 0) (color 0 0 0 0) (uuid \"{}\"))",
-            jx, jy, uuid.next());
+            jx,
+            jy,
+            uuid.next()
+        );
     }
 }
 
@@ -443,7 +528,9 @@ pub fn render_to_kicad_sch(
 
     let mut power_nets: HashMap<String, PowerType> = HashMap::new();
     for ps in &schematic.power_symbols {
-        power_nets.entry(ps.net_name.clone()).or_insert(ps.power_type);
+        power_nets
+            .entry(ps.net_name.clone())
+            .or_insert(ps.power_type);
     }
     for (net_name, ptype) in &power_nets {
         emit_power_lib_symbol(net_name, *ptype, &mut out);
@@ -498,11 +585,11 @@ pub fn render_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{
-        Component, Junction, Label, Point, PowerSymbol, PowerType, Wire,
-    };
+    use crate::model::{Component, Junction, Label, Point, PowerSymbol, PowerType, Wire};
 
-    fn schem() -> Schematic { Schematic::new("kicad_test") }
+    fn schem() -> Schematic {
+        Schematic::new("kicad_test")
+    }
 
     fn parens_balanced(s: &str) -> bool {
         let mut depth: i32 = 0;
@@ -510,14 +597,18 @@ mod tests {
         let mut prev = '\0';
         for c in s.chars() {
             if in_str {
-                if c == '"' && prev != '\\' { in_str = false; }
+                if c == '"' && prev != '\\' {
+                    in_str = false;
+                }
             } else {
                 match c {
                     '"' => in_str = true,
                     '(' => depth += 1,
                     ')' => {
                         depth -= 1;
-                        if depth < 0 { return false; }
+                        if depth < 0 {
+                            return false;
+                        }
                     }
                     _ => {}
                 }
@@ -558,7 +649,9 @@ mod tests {
     #[test]
     fn wires_emit_wire_blocks() {
         let mut s = schem();
-        s.wires.push(Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 10.0)] });
+        s.wires.push(Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 10.0)],
+        });
         let body = render_to_kicad_sch(&s, &HashMap::new());
         assert!(body.contains("(wire"), "expected (wire ...) block");
         assert!(parens_balanced(&body));
@@ -567,8 +660,13 @@ mod tests {
     #[test]
     fn labels_and_junctions_appear() {
         let mut s = schem();
-        s.labels.push(Label { name: "n1".into(), position: Point::new(5.0, 5.0) });
-        s.junctions.push(Junction { position: Point::new(10.0, 0.0) });
+        s.labels.push(Label {
+            name: "n1".into(),
+            position: Point::new(5.0, 5.0),
+        });
+        s.junctions.push(Junction {
+            position: Point::new(10.0, 0.0),
+        });
         let body = render_to_kicad_sch(&s, &HashMap::new());
         assert!(body.contains("n1"), "label name missing");
         assert!(body.contains("(junction"), "junction block missing");

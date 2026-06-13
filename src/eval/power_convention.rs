@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::model::Schematic;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct PowerConventionReport {
@@ -54,14 +54,26 @@ pub fn check(schematic: &Schematic) -> PowerConventionReport {
     let score = if total_pairs == 0 {
         1.0
     } else {
-        let valid_pairs = pmos.iter().flat_map(|(_, px, py)| {
-            nmos.iter().filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
-                .map(move |(_, _, ny)| if py <= ny { 1.0 } else { 0.0 })
-        }).sum::<f64>();
-        let compared = pmos.iter().flat_map(|(_, px, _)| {
-            nmos.iter().filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
-        }).count();
-        if compared > 0 { round2(valid_pairs / compared as f64) } else { 1.0 }
+        let valid_pairs = pmos
+            .iter()
+            .flat_map(|(_, px, py)| {
+                nmos.iter()
+                    .filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
+                    .map(move |(_, _, ny)| if py <= ny { 1.0 } else { 0.0 })
+            })
+            .sum::<f64>();
+        let compared = pmos
+            .iter()
+            .flat_map(|(_, px, _)| {
+                nmos.iter()
+                    .filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
+            })
+            .count();
+        if compared > 0 {
+            round2(valid_pairs / compared as f64)
+        } else {
+            1.0
+        }
     };
 
     PowerConventionReport {
@@ -129,8 +141,8 @@ mod tests {
     fn devices_in_different_columns_are_not_compared() {
         // x_threshold = 100. Pair separated by 200 → no comparison, no violation.
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "pmos4",   0.0, 100.0));
-        s.components.push(comp("M2", "nmos4", 200.0,   0.0));
+        s.components.push(comp("M1", "pmos4", 0.0, 100.0));
+        s.components.push(comp("M2", "nmos4", 200.0, 0.0));
         let r = check(&s);
         assert!(r.violations.is_empty());
         assert_eq!(r.score, 1.0);
@@ -143,10 +155,10 @@ mod tests {
         // M4 (pmos bottom) vs M3 (nmos top): violation (py=100 > ny=0).
         // → 2 valid + 1 violation across 3 compared pairs in column 0.
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "pmos4", 0.0,   0.0));
+        s.components.push(comp("M1", "pmos4", 0.0, 0.0));
         s.components.push(comp("M4", "pmos4", 0.0, 100.0));
-        s.components.push(comp("M2", "nmos4", 0.0,   0.0));
-        s.components.push(comp("M3", "nmos4", 0.0,  50.0));
+        s.components.push(comp("M2", "nmos4", 0.0, 0.0));
+        s.components.push(comp("M3", "nmos4", 0.0, 50.0));
         let r = check(&s);
         // M1 vs M2 (0 ≤ 0): valid
         // M1 vs M3 (0 ≤ 50): valid

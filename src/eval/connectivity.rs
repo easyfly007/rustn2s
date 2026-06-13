@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use serde::Serialize;
-use crate::model::{Schematic, Point, builtin_symbols};
-use crate::parser::{ParseResult, pin_names_for_symbol};
+use crate::model::{builtin_symbols, Point, Schematic};
+use crate::parser::{pin_names_for_symbol, ParseResult};
 use crate::placer::SchematicPlacer;
+use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 pub struct ConnectivityReport {
@@ -36,7 +36,9 @@ pub fn check(parse_result: &ParseResult, schematic: &Schematic) -> ConnectivityR
         let sym_name = SchematicPlacer::symbol_for_device(device);
         let pin_names = pin_names_for_symbol(&sym_name);
         for (i, node) in device.nodes.iter().enumerate() {
-            if i >= pin_names.len() { break; }
+            if i >= pin_names.len() {
+                break;
+            }
             *expected_nets.entry(node.clone()).or_insert(0) += 1;
         }
     }
@@ -89,7 +91,8 @@ pub fn check(parse_result: &ParseResult, schematic: &Schematic) -> ConnectivityR
     *actual_nets.entry("__wires__".into()).or_insert(0) += schematic.wires.len();
 
     // Identify orphan labels (appear only once)
-    let orphan_labels: Vec<String> = label_counts.iter()
+    let orphan_labels: Vec<String> = label_counts
+        .iter()
         .filter(|(_, &count)| count == 1)
         .map(|(name, _)| name.clone())
         .collect();
@@ -97,7 +100,9 @@ pub fn check(parse_result: &ParseResult, schematic: &Schematic) -> ConnectivityR
     // Count duplicate label positions (same name, same position)
     let mut dup_count = 0;
     for label_name in label_counts.keys() {
-        let positions: Vec<&Point> = schematic.labels.iter()
+        let positions: Vec<&Point> = schematic
+            .labels
+            .iter()
             .filter(|l| l.name == *label_name)
             .map(|l| &l.position)
             .collect();
@@ -185,7 +190,10 @@ mod tests {
     fn label_appearing_once_is_orphan() {
         let pr = parse("* one\nR1 a b 1k\n");
         let mut s = Schematic::new("");
-        s.labels.push(Label { name: "lonely".into(), position: Point::new(0.0, 0.0) });
+        s.labels.push(Label {
+            name: "lonely".into(),
+            position: Point::new(0.0, 0.0),
+        });
         let r = check(&pr, &s);
         assert!(r.orphan_labels.contains(&"lonely".to_string()));
     }
@@ -194,8 +202,14 @@ mod tests {
     fn label_appearing_twice_is_not_orphan() {
         let pr = parse("* two\nR1 a b 1k\nR2 b c 1k\n");
         let mut s = Schematic::new("");
-        s.labels.push(Label { name: "b".into(), position: Point::new(0.0, 0.0) });
-        s.labels.push(Label { name: "b".into(), position: Point::new(100.0, 0.0) });
+        s.labels.push(Label {
+            name: "b".into(),
+            position: Point::new(0.0, 0.0),
+        });
+        s.labels.push(Label {
+            name: "b".into(),
+            position: Point::new(100.0, 0.0),
+        });
         let r = check(&pr, &s);
         assert!(!r.orphan_labels.contains(&"b".to_string()));
     }
@@ -205,9 +219,18 @@ mod tests {
         // Same name AND ~same position counts as one duplicate pair.
         let pr = parse("* two\nR1 a b 1k\n");
         let mut s = Schematic::new("");
-        s.labels.push(Label { name: "n".into(), position: Point::new(50.0, 50.0) });
-        s.labels.push(Label { name: "n".into(), position: Point::new(50.5, 50.0) }); // close
-        s.labels.push(Label { name: "n".into(), position: Point::new(500.0, 0.0) });  // far
+        s.labels.push(Label {
+            name: "n".into(),
+            position: Point::new(50.0, 50.0),
+        });
+        s.labels.push(Label {
+            name: "n".into(),
+            position: Point::new(50.5, 50.0),
+        }); // close
+        s.labels.push(Label {
+            name: "n".into(),
+            position: Point::new(500.0, 0.0),
+        }); // far
         let r = check(&pr, &s);
         assert_eq!(r.duplicate_label_positions, 1);
     }
@@ -216,8 +239,14 @@ mod tests {
     fn found_net_count_aggregates_labels_and_power() {
         let pr = parse("* mixed\nR1 a b 1k\n");
         let mut s = Schematic::new("");
-        s.labels.push(Label { name: "a".into(), position: Point::new(0.0, 0.0) });
-        s.labels.push(Label { name: "b".into(), position: Point::new(50.0, 0.0) });
+        s.labels.push(Label {
+            name: "a".into(),
+            position: Point::new(0.0, 0.0),
+        });
+        s.labels.push(Label {
+            name: "b".into(),
+            position: Point::new(50.0, 0.0),
+        });
         s.power_symbols.push(PowerSymbol {
             power_type: PowerType::GND,
             net_name: "0".into(),

@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet, BTreeMap};
 use crate::parser::{SpiceDevice, SpiceParser};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlockType {
@@ -47,10 +47,14 @@ impl Default for CircuitAnalyzer {
 }
 
 impl CircuitAnalyzer {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn analyze(&self, devices: &[SpiceDevice], opts: &ClusterOptions) -> Vec<FunctionalBlock> {
-        if devices.is_empty() { return Vec::new(); }
+        if devices.is_empty() {
+            return Vec::new();
+        }
 
         let power_nets = self.identify_power_nets(devices);
         let mut assigned: HashSet<usize> = HashSet::new();
@@ -88,7 +92,10 @@ impl CircuitAnalyzer {
     pub fn identify_power_nets(&self, devices: &[SpiceDevice]) -> HashSet<String> {
         let mut power: HashSet<String> = [
             "0", "gnd", "gnd!", "vss", "vss!", "vdd", "vdd!", "vcc", "vcc!", "avdd", "avss",
-        ].iter().map(|s| s.to_string()).collect();
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
         for dev in devices {
             if dev.device_type == 'V' {
@@ -118,8 +125,11 @@ impl CircuitAnalyzer {
     }
 
     fn find_diff_pairs(
-        &self, devices: &[SpiceDevice], power_nets: &HashSet<String>,
-        assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
+        &self,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
+        assigned: &mut HashSet<usize>,
+        blocks: &mut Vec<FunctionalBlock>,
     ) {
         // Group unassigned transistors (MOSFET or BJT) by (type, source/emitter).
         // BJTs share the node[0..3] = (collector, base, emitter) convention,
@@ -127,22 +137,32 @@ impl CircuitAnalyzer {
         let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
 
         for (i, dev) in devices.iter().enumerate() {
-            if assigned.contains(&i) { continue; }
+            if assigned.contains(&i) {
+                continue;
+            }
             let ttype = match Self::transistor_type(dev) {
                 Some(t) => t,
                 None => continue,
             };
             let source = &dev.nodes[2];
-            if power_nets.contains(&source.to_lowercase()) { continue; }
+            if power_nets.contains(&source.to_lowercase()) {
+                continue;
+            }
             groups.entry((ttype, source.clone())).or_default().push(i);
         }
 
         for group in groups.values() {
-            if group.len() < 2 { continue; }
+            if group.len() < 2 {
+                continue;
+            }
             for a in 0..group.len() {
-                if assigned.contains(&group[a]) { continue; }
+                if assigned.contains(&group[a]) {
+                    continue;
+                }
                 for b in (a + 1)..group.len() {
-                    if assigned.contains(&group[b]) { continue; }
+                    if assigned.contains(&group[b]) {
+                        continue;
+                    }
                     let ma = &devices[group[a]];
                     let mb = &devices[group[b]];
                     // Different gates, different drains
@@ -157,7 +177,9 @@ impl CircuitAnalyzer {
                             all_nets: HashSet::new(),
                         };
                         for &idx in &block.device_indices {
-                            for n in &devices[idx].nodes { block.all_nets.insert(n.clone()); }
+                            for n in &devices[idx].nodes {
+                                block.all_nets.insert(n.clone());
+                            }
                         }
                         assigned.insert(group[a]);
                         assigned.insert(group[b]);
@@ -168,12 +190,18 @@ impl CircuitAnalyzer {
                         // BJT diff pair).
                         let tail_net = &ma.nodes[2];
                         for (k, dev) in devices.iter().enumerate() {
-                            if assigned.contains(&k) { continue; }
-                            if dev.nodes.is_empty() || dev.nodes[0] != *tail_net { continue; }
+                            if assigned.contains(&k) {
+                                continue;
+                            }
+                            if dev.nodes.is_empty() || dev.nodes[0] != *tail_net {
+                                continue;
+                            }
                             let is_tail_source = matches!(dev.device_type, 'M' | 'Q' | 'I');
                             if is_tail_source {
                                 block.device_indices.push(k);
-                                for n in &dev.nodes { block.all_nets.insert(n.clone()); }
+                                for n in &dev.nodes {
+                                    block.all_nets.insert(n.clone());
+                                }
                                 assigned.insert(k);
                                 break;
                             }
@@ -183,14 +211,19 @@ impl CircuitAnalyzer {
                         break;
                     }
                 }
-                if assigned.contains(&group[a]) { break; }
+                if assigned.contains(&group[a]) {
+                    break;
+                }
             }
         }
     }
 
     fn find_current_mirrors(
-        &self, devices: &[SpiceDevice], _power_nets: &HashSet<String>,
-        assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
+        &self,
+        devices: &[SpiceDevice],
+        _power_nets: &HashSet<String>,
+        assigned: &mut HashSet<usize>,
+        blocks: &mut Vec<FunctionalBlock>,
     ) {
         // Group unassigned transistors by (type, gate/base_net, source/emitter_net).
         // Mirror criterion: shared control and reference terminals, with at
@@ -198,7 +231,9 @@ impl CircuitAnalyzer {
         let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
 
         for (i, dev) in devices.iter().enumerate() {
-            if assigned.contains(&i) { continue; }
+            if assigned.contains(&i) {
+                continue;
+            }
             let ttype = match Self::transistor_type(dev) {
                 Some(t) => t,
                 None => continue,
@@ -208,10 +243,16 @@ impl CircuitAnalyzer {
         }
 
         for group in groups.values() {
-            if group.len() < 2 { continue; }
+            if group.len() < 2 {
+                continue;
+            }
             // Need at least one diode-connected device
-            let has_diode = group.iter().any(|&idx| devices[idx].nodes[0] == devices[idx].nodes[1]);
-            if !has_diode { continue; }
+            let has_diode = group
+                .iter()
+                .any(|&idx| devices[idx].nodes[0] == devices[idx].nodes[1]);
+            if !has_diode {
+                continue;
+            }
 
             let mut block = FunctionalBlock {
                 block_type: BlockType::CurrentMirror,
@@ -225,7 +266,9 @@ impl CircuitAnalyzer {
 
             for &idx in group {
                 block.device_indices.push(idx);
-                for n in &devices[idx].nodes { block.all_nets.insert(n.clone()); }
+                for n in &devices[idx].nodes {
+                    block.all_nets.insert(n.clone());
+                }
                 assigned.insert(idx);
 
                 if devices[idx].nodes[0] == devices[idx].nodes[1] {
@@ -242,24 +285,35 @@ impl CircuitAnalyzer {
     }
 
     fn find_cascode_pairs(
-        &self, devices: &[SpiceDevice], _power_nets: &HashSet<String>,
-        assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
+        &self,
+        devices: &[SpiceDevice],
+        _power_nets: &HashSet<String>,
+        assigned: &mut HashSet<usize>,
+        blocks: &mut Vec<FunctionalBlock>,
     ) {
         for i in 0..devices.len() {
-            if assigned.contains(&i) { continue; }
+            if assigned.contains(&i) {
+                continue;
+            }
             let ti = match Self::transistor_type(&devices[i]) {
                 Some(t) => t,
                 None => continue,
             };
             for j in 0..devices.len() {
-                if i == j || assigned.contains(&j) { continue; }
+                if i == j || assigned.contains(&j) {
+                    continue;
+                }
                 let tj = match Self::transistor_type(&devices[j]) {
                     Some(t) => t,
                     None => continue,
                 };
-                if ti != tj { continue; }
+                if ti != tj {
+                    continue;
+                }
                 // di.source/emitter == dj.drain/collector (di is upper, dj is lower)
-                if devices[i].nodes[2] == devices[j].nodes[0] && devices[i].nodes[1] != devices[j].nodes[1] {
+                if devices[i].nodes[2] == devices[j].nodes[0]
+                    && devices[i].nodes[1] != devices[j].nodes[1]
+                {
                     let mut block = FunctionalBlock {
                         block_type: BlockType::CascodePair,
                         id: String::new(),
@@ -270,7 +324,9 @@ impl CircuitAnalyzer {
                         all_nets: HashSet::new(),
                     };
                     for &idx in &block.device_indices {
-                        for n in &devices[idx].nodes { block.all_nets.insert(n.clone()); }
+                        for n in &devices[idx].nodes {
+                            block.all_nets.insert(n.clone());
+                        }
                     }
                     assigned.insert(i);
                     assigned.insert(j);
@@ -282,24 +338,37 @@ impl CircuitAnalyzer {
     }
 
     fn find_inverters(
-        &self, devices: &[SpiceDevice], power_nets: &HashSet<String>,
-        assigned: &mut HashSet<usize>, blocks: &mut Vec<FunctionalBlock>,
+        &self,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
+        assigned: &mut HashSet<usize>,
+        blocks: &mut Vec<FunctionalBlock>,
     ) {
         let nmos_idx: Vec<usize> = (0..devices.len())
-            .filter(|&i| !assigned.contains(&i) && devices[i].device_type == 'M'
-                && devices[i].nodes.len() >= 3
-                && SpiceParser::infer_mos_type(&devices[i]) == "nmos4")
+            .filter(|&i| {
+                !assigned.contains(&i)
+                    && devices[i].device_type == 'M'
+                    && devices[i].nodes.len() >= 3
+                    && SpiceParser::infer_mos_type(&devices[i]) == "nmos4"
+            })
             .collect();
         let pmos_idx: Vec<usize> = (0..devices.len())
-            .filter(|&i| !assigned.contains(&i) && devices[i].device_type == 'M'
-                && devices[i].nodes.len() >= 3
-                && SpiceParser::infer_mos_type(&devices[i]) == "pmos4")
+            .filter(|&i| {
+                !assigned.contains(&i)
+                    && devices[i].device_type == 'M'
+                    && devices[i].nodes.len() >= 3
+                    && SpiceParser::infer_mos_type(&devices[i]) == "pmos4"
+            })
             .collect();
 
         for &ni in &nmos_idx {
-            if assigned.contains(&ni) { continue; }
+            if assigned.contains(&ni) {
+                continue;
+            }
             for &pi in &pmos_idx {
-                if assigned.contains(&pi) { continue; }
+                if assigned.contains(&pi) {
+                    continue;
+                }
                 let mn = &devices[ni];
                 let mp = &devices[pi];
                 if mn.nodes[1] == mp.nodes[1]    // same gate
@@ -317,7 +386,9 @@ impl CircuitAnalyzer {
                         all_nets: HashSet::new(),
                     };
                     for &idx in &block.device_indices {
-                        for n in &devices[idx].nodes { block.all_nets.insert(n.clone()); }
+                        for n in &devices[idx].nodes {
+                            block.all_nets.insert(n.clone());
+                        }
                     }
                     assigned.insert(ni);
                     assigned.insert(pi);
@@ -333,11 +404,16 @@ impl CircuitAnalyzer {
     // ========================================================================
 
     fn cluster_devices(
-        &self, devices: &[SpiceDevice], power_nets: &HashSet<String>,
-        opts: &ClusterOptions, device_indices: &[usize],
+        &self,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
+        opts: &ClusterOptions,
+        device_indices: &[usize],
     ) -> Vec<Vec<usize>> {
         let n = device_indices.len();
-        if n == 0 { return Vec::new(); }
+        if n == 0 {
+            return Vec::new();
+        }
 
         // Build net → local indices
         let mut net_to_local: HashMap<String, Vec<usize>> = HashMap::new();
@@ -370,7 +446,9 @@ impl CircuitAnalyzer {
 
         // Iteratively merge
         loop {
-            if cluster_members.len() <= 1 { break; }
+            if cluster_members.len() <= 1 {
+                break;
+            }
 
             let active: Vec<usize> = cluster_members.keys().copied().collect();
             let mut best_a = 0usize;
@@ -393,7 +471,9 @@ impl CircuitAnalyzer {
                             total_weight += adjacency.get(&(lo, hi)).copied().unwrap_or(0);
                         }
                     }
-                    if total_weight == 0 { continue; }
+                    if total_weight == 0 {
+                        continue;
+                    }
 
                     let score = total_weight as f64 / members_a.len().min(members_b.len()) as f64;
                     if score > best_score {
@@ -405,10 +485,14 @@ impl CircuitAnalyzer {
                 }
             }
 
-            if !found || best_score < opts.merge_threshold { break; }
+            if !found || best_score < opts.merge_threshold {
+                break;
+            }
 
             let merged_size = cluster_members[&best_a].len() + cluster_members[&best_b].len();
-            if merged_size > opts.max_cluster_size { break; }
+            if merged_size > opts.max_cluster_size {
+                break;
+            }
 
             let members_b = cluster_members.remove(&best_b).unwrap();
             cluster_members.get_mut(&best_a).unwrap().extend(members_b);
@@ -424,11 +508,16 @@ impl CircuitAnalyzer {
     }
 
     fn annotate_cluster(
-        &self, cluster: &[usize], devices: &[SpiceDevice], power_nets: &HashSet<String>,
+        &self,
+        cluster: &[usize],
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
     ) -> Vec<FunctionalBlock> {
         let mut all_nets = HashSet::new();
         for &idx in cluster {
-            for n in &devices[idx].nodes { all_nets.insert(n.clone()); }
+            for n in &devices[idx].nodes {
+                all_nets.insert(n.clone());
+            }
         }
 
         if cluster.len() == 1 {
@@ -459,7 +548,10 @@ impl CircuitAnalyzer {
     }
 
     fn infer_single_device_io(
-        &self, block: &mut FunctionalBlock, devices: &[SpiceDevice], power_nets: &HashSet<String>,
+        &self,
+        block: &mut FunctionalBlock,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
     ) {
         let dev = &devices[block.device_indices[0]];
         match dev.device_type {
@@ -483,8 +575,10 @@ impl CircuitAnalyzer {
                 block.output_nets.push(dev.nodes[0].clone());
                 // Negative terminal is an input only if it's not a standard ground
                 let node1_lower = dev.nodes[1].to_lowercase();
-                let is_ground = matches!(node1_lower.as_str(),
-                    "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss");
+                let is_ground = matches!(
+                    node1_lower.as_str(),
+                    "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss"
+                );
                 if !is_ground {
                     block.input_nets.push(dev.nodes[1].clone());
                 }
@@ -502,13 +596,20 @@ impl CircuitAnalyzer {
     }
 
     fn infer_cluster_io(
-        &self, block: &mut FunctionalBlock, devices: &[SpiceDevice], power_nets: &HashSet<String>,
+        &self,
+        block: &mut FunctionalBlock,
+        devices: &[SpiceDevice],
+        power_nets: &HashSet<String>,
     ) {
-        let cluster_names: HashSet<&str> = block.device_indices.iter()
+        let cluster_names: HashSet<&str> = block
+            .device_indices
+            .iter()
             .map(|&i| devices[i].instance_name.as_str())
             .collect();
 
-        let cluster_nets: HashSet<String> = block.device_indices.iter()
+        let cluster_nets: HashSet<String> = block
+            .device_indices
+            .iter()
             .flat_map(|&i| devices[i].nodes.iter().cloned())
             .collect();
 
@@ -516,9 +617,12 @@ impl CircuitAnalyzer {
         let mut internal_only = HashSet::new();
 
         for net in &cluster_nets {
-            if power_nets.contains(&net.to_lowercase()) { continue; }
-            let used_externally = devices.iter()
-                .any(|d| !cluster_names.contains(d.instance_name.as_str()) && d.nodes.contains(net));
+            if power_nets.contains(&net.to_lowercase()) {
+                continue;
+            }
+            let used_externally = devices.iter().any(|d| {
+                !cluster_names.contains(d.instance_name.as_str()) && d.nodes.contains(net)
+            });
             if used_externally {
                 external_nets.insert(net.clone());
             } else {
@@ -534,12 +638,20 @@ impl CircuitAnalyzer {
             for &idx in &block.device_indices {
                 let dev = &devices[idx];
                 if (dev.device_type == 'M' || dev.device_type == 'Q') && dev.nodes.len() >= 3 {
-                    if dev.nodes[1] == *net { is_input = true; }
-                    if dev.nodes[0] == *net { is_output = true; }
+                    if dev.nodes[1] == *net {
+                        is_input = true;
+                    }
+                    if dev.nodes[0] == *net {
+                        is_output = true;
+                    }
                 }
             }
-            if is_input && !block.input_nets.contains(net) { block.input_nets.push(net.clone()); }
-            if is_output && !block.output_nets.contains(net) { block.output_nets.push(net.clone()); }
+            if is_input && !block.input_nets.contains(net) {
+                block.input_nets.push(net.clone());
+            }
+            if is_output && !block.output_nets.contains(net) {
+                block.output_nets.push(net.clone());
+            }
             if !is_input && !is_output && !block.output_nets.contains(net) {
                 block.output_nets.push(net.clone());
             }
@@ -554,7 +666,8 @@ mod tests {
 
     #[test]
     fn test_inverter_detection() {
-        let spice = "* CMOS Inverter\nM1 out in vdd vdd pch W=20u L=1u\nM2 out in 0 0 nch W=10u L=1u\n";
+        let spice =
+            "* CMOS Inverter\nM1 out in vdd vdd pch W=20u L=1u\nM2 out in 0 0 nch W=10u L=1u\n";
         let mut parser = SpiceParser::new();
         let pr = parser.parse(spice);
         let analyzer = CircuitAnalyzer::new();
@@ -588,7 +701,10 @@ mod tests {
         let analyzer = CircuitAnalyzer::new();
         let blocks = analyzer.analyze(&pr.devices, &ClusterOptions::default());
         let dp = blocks.iter().find(|b| b.block_type == BlockType::DiffPair);
-        assert!(dp.is_some(), "Q1/Q2 should be recognized as a BJT diff pair");
+        assert!(
+            dp.is_some(),
+            "Q1/Q2 should be recognized as a BJT diff pair"
+        );
         // Diff pair should pull in I1 as the tail source
         assert_eq!(dp.unwrap().device_indices.len(), 3);
     }

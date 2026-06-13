@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use super::geometry::Point;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PinDirection {
@@ -19,12 +19,42 @@ pub struct SymbolPin {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SymbolGraphic {
-    Line { x1: f64, y1: f64, x2: f64, y2: f64 },
-    Rect { x: f64, y: f64, width: f64, height: f64, filled: bool },
-    Circle { cx: f64, cy: f64, radius: f64, filled: bool },
-    Arc { cx: f64, cy: f64, radius: f64, start_angle: f64, span_angle: f64 },
-    Polyline { points: Vec<Point>, filled: bool },
-    Text { x: f64, y: f64, text: String, font_size: f64 },
+    Line {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+    },
+    Rect {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        filled: bool,
+    },
+    Circle {
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        filled: bool,
+    },
+    Arc {
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        span_angle: f64,
+    },
+    Polyline {
+        points: Vec<Point>,
+        filled: bool,
+    },
+    Text {
+        x: f64,
+        y: f64,
+        text: String,
+        font_size: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +88,13 @@ impl SymbolDef {
                     expand(*x1, *y1);
                     expand(*x2, *y2);
                 }
-                SymbolGraphic::Rect { x, y, width, height, .. } => {
+                SymbolGraphic::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } => {
                     expand(*x, *y);
                     expand(x + width, y + height);
                 }
@@ -97,7 +133,12 @@ pub mod builtin_symbols {
     use std::collections::HashMap;
 
     fn pin(name: &str, num: i32, x: f64, y: f64, dir: PinDirection) -> SymbolPin {
-        SymbolPin { name: name.into(), pin_number: num, offset: Point::new(x, y), direction: dir }
+        SymbolPin {
+            name: name.into(),
+            pin_number: num,
+            offset: Point::new(x, y),
+            direction: dir,
+        }
     }
 
     fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> SymbolGraphic {
@@ -112,16 +153,32 @@ pub mod builtin_symbols {
     }
 
     fn circle(cx: f64, cy: f64, r: f64, filled: bool) -> SymbolGraphic {
-        SymbolGraphic::Circle { cx, cy, radius: r, filled }
+        SymbolGraphic::Circle {
+            cx,
+            cy,
+            radius: r,
+            filled,
+        }
     }
 
     fn arc(cx: f64, cy: f64, r: f64, start: f64, span: f64) -> SymbolGraphic {
-        SymbolGraphic::Arc { cx, cy, radius: r, start_angle: start, span_angle: span }
+        SymbolGraphic::Arc {
+            cx,
+            cy,
+            radius: r,
+            start_angle: start,
+            span_angle: span,
+        }
     }
 
     #[allow(dead_code)]
     fn text(x: f64, y: f64, t: &str, size: f64) -> SymbolGraphic {
-        SymbolGraphic::Text { x, y, text: t.into(), font_size: size }
+        SymbolGraphic::Text {
+            x,
+            y,
+            text: t.into(),
+            font_size: size,
+        }
     }
 
     pub fn create_nmos4() -> SymbolDef {
@@ -328,16 +385,31 @@ pub mod builtin_symbols {
                 pin("CP", 3, -15.0, -10.0, PinDirection::Left),
                 pin("CN", 4, -15.0, 10.0, PinDirection::Left),
             ],
-            graphics: vec![
-                polyline(&[(0.0, -15.0), (15.0, 0.0), (0.0, 15.0), (-15.0, 0.0), (0.0, -15.0)], false),
-            ],
+            graphics: vec![polyline(
+                &[
+                    (0.0, -15.0),
+                    (15.0, 0.0),
+                    (0.0, 15.0),
+                    (-15.0, 0.0),
+                    (0.0, -15.0),
+                ],
+                false,
+            )],
         }
     }
 
-    pub fn create_vcvs() -> SymbolDef { create_controlled_source("vcvs") }
-    pub fn create_vccs() -> SymbolDef { create_controlled_source("vccs") }
-    pub fn create_ccvs() -> SymbolDef { create_controlled_source("ccvs") }
-    pub fn create_cccs() -> SymbolDef { create_controlled_source("cccs") }
+    pub fn create_vcvs() -> SymbolDef {
+        create_controlled_source("vcvs")
+    }
+    pub fn create_vccs() -> SymbolDef {
+        create_controlled_source("vccs")
+    }
+    pub fn create_ccvs() -> SymbolDef {
+        create_controlled_source("ccvs")
+    }
+    pub fn create_cccs() -> SymbolDef {
+        create_controlled_source("cccs")
+    }
 
     /// Create a dynamic symbol for a subcircuit instance.
     /// Rendered as a rectangular box with labeled ports on left and right sides.
@@ -358,8 +430,10 @@ pub mod builtin_symbols {
 
         // Box outline
         graphics.push(SymbolGraphic::Rect {
-            x: -half_w, y: -half_h,
-            width: box_width, height: box_height,
+            x: -half_w,
+            y: -half_h,
+            width: box_width,
+            height: box_height,
             filled: true,
         });
 
@@ -375,8 +449,10 @@ pub mod builtin_symbols {
             });
             // Stub line from pin to box edge
             graphics.push(SymbolGraphic::Line {
-                x1: pin_x, y1: y,
-                x2: -half_w, y2: y,
+                x1: pin_x,
+                y1: y,
+                x2: -half_w,
+                y2: y,
             });
         }
 
@@ -393,14 +469,17 @@ pub mod builtin_symbols {
             });
             // Stub line from box edge to pin
             graphics.push(SymbolGraphic::Line {
-                x1: half_w, y1: y,
-                x2: pin_x, y2: y,
+                x1: half_w,
+                y1: y,
+                x2: pin_x,
+                y2: y,
             });
         }
 
         // Subcircuit name text in center
         graphics.push(SymbolGraphic::Text {
-            x: 0.0, y: 0.0,
+            x: 0.0,
+            y: 0.0,
             text: subckt_name.to_string(),
             font_size: 10.0,
         });
@@ -415,11 +494,20 @@ pub mod builtin_symbols {
     /// Get all builtin symbols as a HashMap keyed by name.
     pub fn all() -> HashMap<String, SymbolDef> {
         let syms = vec![
-            create_nmos4(), create_pmos4(),
-            create_resistor(), create_capacitor(), create_inductor(),
-            create_diode(), create_npn(), create_pnp(),
-            create_vsource(), create_isource(),
-            create_vcvs(), create_vccs(), create_ccvs(), create_cccs(),
+            create_nmos4(),
+            create_pmos4(),
+            create_resistor(),
+            create_capacitor(),
+            create_inductor(),
+            create_diode(),
+            create_npn(),
+            create_pnp(),
+            create_vsource(),
+            create_isource(),
+            create_vcvs(),
+            create_vccs(),
+            create_ccvs(),
+            create_cccs(),
         ];
         syms.into_iter().map(|s| (s.name.clone(), s)).collect()
     }
@@ -427,16 +515,28 @@ pub mod builtin_symbols {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::builtin_symbols;
+    use super::*;
 
     #[test]
     fn all_returns_14_named_symbols() {
         let map = builtin_symbols::all();
         assert_eq!(map.len(), 14);
         for name in [
-            "nmos4", "pmos4", "resistor", "capacitor", "inductor", "diode",
-            "npn", "pnp", "vsource", "isource", "vcvs", "vccs", "ccvs", "cccs",
+            "nmos4",
+            "pmos4",
+            "resistor",
+            "capacitor",
+            "inductor",
+            "diode",
+            "npn",
+            "pnp",
+            "vsource",
+            "isource",
+            "vcvs",
+            "vccs",
+            "ccvs",
+            "cccs",
         ] {
             assert!(map.contains_key(name), "missing builtin symbol: {}", name);
             // Each symbol's stored name matches its key
@@ -468,7 +568,11 @@ mod tests {
 
     #[test]
     fn empty_symbol_bounding_rect_is_zero() {
-        let empty = SymbolDef { name: "x".into(), pins: vec![], graphics: vec![] };
+        let empty = SymbolDef {
+            name: "x".into(),
+            pins: vec![],
+            graphics: vec![],
+        };
         let r = empty.bounding_rect();
         assert_eq!(r.width, 0.0);
         assert_eq!(r.height, 0.0);
@@ -476,7 +580,10 @@ mod tests {
 
     #[test]
     fn subcircuit_symbol_has_one_pin_per_port() {
-        let ports: Vec<String> = ["A", "B", "C", "D", "E"].iter().map(|s| s.to_string()).collect();
+        let ports: Vec<String> = ["A", "B", "C", "D", "E"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let sym = builtin_symbols::create_subcircuit_symbol("OPAMP", &ports);
 
         assert_eq!(sym.name, "subckt_OPAMP");
@@ -488,8 +595,16 @@ mod tests {
 
         // Pins split between left (first half, ceil) and right
         // n=5 → left_count = 3 (Left), right_count = 2 (Right)
-        let left = sym.pins.iter().filter(|p| p.direction == PinDirection::Left).count();
-        let right = sym.pins.iter().filter(|p| p.direction == PinDirection::Right).count();
+        let left = sym
+            .pins
+            .iter()
+            .filter(|p| p.direction == PinDirection::Left)
+            .count();
+        let right = sym
+            .pins
+            .iter()
+            .filter(|p| p.direction == PinDirection::Right)
+            .count();
         assert_eq!(left, 3);
         assert_eq!(right, 2);
     }

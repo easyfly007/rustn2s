@@ -2,8 +2,7 @@ use crate::model::Schematic;
 
 /// Export schematic as structured JSON (.n2s.json)
 pub fn render_to_json(schematic: &Schematic) -> Result<String, String> {
-    serde_json::to_string_pretty(schematic)
-        .map_err(|e| format!("JSON serialization error: {}", e))
+    serde_json::to_string_pretty(schematic).map_err(|e| format!("JSON serialization error: {}", e))
 }
 
 pub fn render_to_file(schematic: &Schematic, path: &str) -> Result<(), String> {
@@ -36,7 +35,9 @@ mod tests {
             mirrored: true,
             properties: vec![("model".into(), "1k".into())],
         });
-        s.wires.push(Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] });
+        s.wires.push(Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+        });
 
         let body = render_to_json(&s).unwrap();
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();

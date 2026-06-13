@@ -1,5 +1,5 @@
+use crate::model::{builtin_symbols, Schematic};
 use serde::Serialize;
-use crate::model::{Schematic, builtin_symbols};
 
 #[derive(Debug, Serialize)]
 pub struct BoundingBoxReport {
@@ -67,8 +67,14 @@ pub fn check(schematic: &Schematic) -> BoundingBoxReport {
 
     if min_x > max_x {
         return BoundingBoxReport {
-            min_x: 0.0, min_y: 0.0, max_x: 0.0, max_y: 0.0,
-            width: 0.0, height: 0.0, area: 0.0, aspect_ratio: 1.0,
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 0.0,
+            max_y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            area: 0.0,
+            aspect_ratio: 1.0,
             component_count: 0,
         };
     }
@@ -78,7 +84,11 @@ pub fn check(schematic: &Schematic) -> BoundingBoxReport {
     let area = width * height;
     let aspect_ratio = if height > 0.0 && width > 0.0 {
         let r = width / height;
-        if r >= 1.0 { r } else { 1.0 / r }
+        if r >= 1.0 {
+            r
+        } else {
+            1.0 / r
+        }
     } else {
         1.0
     };
@@ -103,9 +113,11 @@ fn round2(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Component, Wire, Label, Point as MPoint};
+    use crate::model::{Component, Label, Point as MPoint, Wire};
 
-    fn empty() -> Schematic { Schematic::new("") }
+    fn empty() -> Schematic {
+        Schematic::new("")
+    }
 
     #[test]
     fn empty_schematic_returns_zero_box() {
@@ -121,7 +133,9 @@ mod tests {
     fn aspect_ratio_is_geq_one_regardless_of_orientation() {
         // Tall: width 10, height 100 → ratio 10
         let mut s = empty();
-        s.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(10.0, 100.0)] });
+        s.wires.push(Wire {
+            points: vec![MPoint::new(0.0, 0.0), MPoint::new(10.0, 100.0)],
+        });
         let r = check(&s);
         assert_eq!(r.width, 10.0);
         assert_eq!(r.height, 100.0);
@@ -129,7 +143,9 @@ mod tests {
 
         // Wide: width 100, height 10 → ratio also 10 (always max/min)
         let mut s2 = empty();
-        s2.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(100.0, 10.0)] });
+        s2.wires.push(Wire {
+            points: vec![MPoint::new(0.0, 0.0), MPoint::new(100.0, 10.0)],
+        });
         let r2 = check(&s2);
         assert_eq!(r2.aspect_ratio, 10.0);
     }
@@ -137,8 +153,13 @@ mod tests {
     #[test]
     fn labels_and_wires_expand_bounds() {
         let mut s = empty();
-        s.labels.push(Label { name: "n".into(), position: MPoint::new(-50.0, 0.0) });
-        s.wires.push(Wire { points: vec![MPoint::new(0.0, 0.0), MPoint::new(0.0, 100.0)] });
+        s.labels.push(Label {
+            name: "n".into(),
+            position: MPoint::new(-50.0, 0.0),
+        });
+        s.wires.push(Wire {
+            points: vec![MPoint::new(0.0, 0.0), MPoint::new(0.0, 100.0)],
+        });
         let r = check(&s);
         assert_eq!(r.min_x, -50.0);
         assert_eq!(r.max_y, 100.0);

@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::model::Schematic;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct WireLengthReport {
@@ -65,7 +65,9 @@ mod tests {
 
     #[test]
     fn single_segment_length() {
-        let w = Wire { points: vec![Point::new(0.0, 0.0), Point::new(3.0, 4.0)] };
+        let w = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(3.0, 4.0)],
+        };
         let r = check(&schematic_with_wires(vec![w]));
         assert_eq!(r.wire_count, 1);
         assert_eq!(r.total_length, 5.0);
@@ -76,10 +78,16 @@ mod tests {
 
     #[test]
     fn multi_wire_min_max_avg() {
-        let short = Wire { points: vec![Point::new(0.0, 0.0), Point::new(0.0, 10.0)] };
-        let long = Wire { points: vec![
-            Point::new(0.0, 0.0), Point::new(50.0, 0.0), Point::new(50.0, 50.0),
-        ] };
+        let short = Wire {
+            points: vec![Point::new(0.0, 0.0), Point::new(0.0, 10.0)],
+        };
+        let long = Wire {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(50.0, 0.0),
+                Point::new(50.0, 50.0),
+            ],
+        };
         let r = check(&schematic_with_wires(vec![short, long]));
         assert_eq!(r.wire_count, 2);
         assert_eq!(r.min_length, 10.0);

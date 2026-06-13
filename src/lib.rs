@@ -1,17 +1,17 @@
+pub mod analyzer;
+pub mod eval;
+pub mod export;
 pub mod model;
 pub mod parser;
-pub mod analyzer;
 pub mod placer;
 pub mod router;
-pub mod export;
-pub mod eval;
 
-use std::collections::HashMap;
-use model::{Schematic, builtin_symbols};
-use parser::ParseResult;
 use analyzer::{CircuitAnalyzer, ClusterOptions};
-use placer::{SchematicPlacer, PlacerOptions};
-use router::{SchematicRouter, RouterOptions};
+use model::{builtin_symbols, Schematic};
+use parser::ParseResult;
+use placer::{PlacerOptions, SchematicPlacer};
+use router::{RouterOptions, SchematicRouter};
+use std::collections::HashMap;
 
 /// Options for the full N2S conversion pipeline.
 #[derive(Default)]
@@ -60,8 +60,7 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
     // 2026-05-01 test-set-expansion findings.
     let has_x_instances = pr.devices.iter().any(|d| d.device_type == 'X');
     let has_subckt_defs = !pr.subcircuits.is_empty();
-    let use_hierarchical =
-        (opts.hierarchical || has_x_instances) && has_subckt_defs;
+    let use_hierarchical = (opts.hierarchical || has_x_instances) && has_subckt_defs;
 
     let (devices, subckt_symbols) = if use_hierarchical {
         // Hierarchical mode: top-level devices, render X instances as boxes
@@ -92,10 +91,17 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
     // 4. Route (pass subcircuit symbols for X instance pin mapping)
     let router = SchematicRouter;
     let schematic = router.route_with_subcircuits(
-        placement, devices, &power_nets, &opts.router, &subckt_symbols,
+        placement,
+        devices,
+        &power_nets,
+        &opts.router,
+        &subckt_symbols,
     );
 
-    Ok(ConvertResult { schematic, subcircuit_symbols: subckt_symbols })
+    Ok(ConvertResult {
+        schematic,
+        subcircuit_symbols: subckt_symbols,
+    })
 }
 
 /// Build dynamic SymbolDef for each subcircuit definition referenced by X instances.
@@ -110,7 +116,7 @@ fn build_subcircuit_symbols(pr: &ParseResult) -> HashMap<String, model::SymbolDe
 
 /// Convenience: convert from file path
 pub fn convert_file(path: &str, opts: &ConvertOptions) -> Result<Schematic, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read file {}: {}", path, e))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("Cannot read file {}: {}", path, e))?;
     convert(&text, opts)
 }

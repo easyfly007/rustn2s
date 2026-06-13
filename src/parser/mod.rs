@@ -43,7 +43,9 @@ impl Default for SpiceParser {
 
 impl SpiceParser {
     pub fn new() -> Self {
-        Self { warnings: Vec::new() }
+        Self {
+            warnings: Vec::new(),
+        }
     }
 
     pub fn parse(&mut self, spice_text: &str) -> ParseResult {
@@ -152,12 +154,14 @@ impl SpiceParser {
                 continue;
             }
 
-            self.warnings.push(format!("Line {}: unrecognized: {}", line_num, line));
+            self.warnings
+                .push(format!("Line {}: unrecognized: {}", line_num, line));
         }
 
         // Unclosed subcircuits
         while let Some(subckt) = subckt_stack.pop() {
-            self.warnings.push(format!("Unclosed .subckt: {}", subckt.name));
+            self.warnings
+                .push(format!("Unclosed .subckt: {}", subckt.name));
             result.subcircuits.push(subckt);
         }
 
@@ -170,8 +174,11 @@ impl SpiceParser {
             Ok(text) => self.parse(&text),
             Err(e) => {
                 let mut r = ParseResult {
-                    title: String::new(), devices: Vec::new(), subcircuits: Vec::new(),
-                    includes: Vec::new(), parameters: HashMap::new(),
+                    title: String::new(),
+                    devices: Vec::new(),
+                    subcircuits: Vec::new(),
+                    includes: Vec::new(),
+                    parameters: HashMap::new(),
                     warnings: vec![format!("Cannot open file: {}: {}", path, e)],
                 };
                 r.warnings = r.warnings.clone();
@@ -234,11 +241,23 @@ impl SpiceParser {
             }
 
             // Strip inline comments
-            let line = if let Some(idx) = line.find('$') { &line[..idx] } else { line };
-            let line = if let Some(idx) = line.find(';') { &line[..idx] } else { line };
+            let line = if let Some(idx) = line.find('$') {
+                &line[..idx]
+            } else {
+                line
+            };
+            let line = if let Some(idx) = line.find(';') {
+                &line[..idx]
+            } else {
+                line
+            };
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
-            if trimmed.starts_with('*') { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with('*') {
+                continue;
+            }
 
             if let Some(rest) = trimmed.strip_prefix('+') {
                 if let Some(last) = merged.last_mut() {
@@ -285,7 +304,9 @@ impl SpiceParser {
     }
 
     fn is_device_line(first_token: &str) -> bool {
-        if first_token.is_empty() { return false; }
+        if first_token.is_empty() {
+            return false;
+        }
         matches!(
             first_token.chars().next().unwrap().to_ascii_uppercase(),
             'M' | 'R' | 'C' | 'L' | 'D' | 'Q' | 'V' | 'I' | 'E' | 'F' | 'G' | 'H' | 'X'
@@ -303,7 +324,8 @@ impl SpiceParser {
         };
 
         if tokens.len() < 2 {
-            self.warnings.push(format!("Line {}: device line too short", line_number));
+            self.warnings
+                .push(format!("Line {}: device line too short", line_number));
             return device;
         }
 
@@ -331,26 +353,42 @@ impl SpiceParser {
             'M' => {
                 // MOSFET: M1 drain gate source bulk model [params]
                 if tokens.len() < 6 {
-                    self.warnings.push(format!("Line {}: MOSFET needs at least 6 tokens", line_number));
-                    for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
+                    self.warnings.push(format!(
+                        "Line {}: MOSFET needs at least 6 tokens",
+                        line_number
+                    ));
+                    for tok in &tokens[1..] {
+                        device.nodes.push(tok.clone());
+                    }
                     return device;
                 }
-                for tok in &tokens[1..=4] { device.nodes.push(tok.clone()); }
+                for tok in &tokens[1..=4] {
+                    device.nodes.push(tok.clone());
+                }
                 device.model_or_value = tokens[5].clone();
-                for tok in &tokens[6..] { Self::parse_param(tok, &mut device.parameters); }
+                for tok in &tokens[6..] {
+                    Self::parse_param(tok, &mut device.parameters);
+                }
             }
             'Q' => {
                 // BJT: Q1 C B E [substrate] model [params]
                 if tokens.len() < 5 {
-                    self.warnings.push(format!("Line {}: BJT needs at least 5 tokens", line_number));
-                    for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
+                    self.warnings
+                        .push(format!("Line {}: BJT needs at least 5 tokens", line_number));
+                    for tok in &tokens[1..] {
+                        device.nodes.push(tok.clone());
+                    }
                     return device;
                 }
-                for tok in &tokens[1..=3] { device.nodes.push(tok.clone()); }
+                for tok in &tokens[1..=3] {
+                    device.nodes.push(tok.clone());
+                }
                 let mut next = 4;
                 // Check for 4-terminal BJT
-                if next < tokens.len() && !tokens[next].contains('=')
-                    && next + 1 < tokens.len() && !tokens[next + 1].contains('=')
+                if next < tokens.len()
+                    && !tokens[next].contains('=')
+                    && next + 1 < tokens.len()
+                    && !tokens[next + 1].contains('=')
                 {
                     device.nodes.push(tokens[next].clone());
                     next += 1;
@@ -359,32 +397,50 @@ impl SpiceParser {
                     device.model_or_value = tokens[next].clone();
                     next += 1;
                 }
-                for tok in &tokens[next..] { Self::parse_param(tok, &mut device.parameters); }
+                for tok in &tokens[next..] {
+                    Self::parse_param(tok, &mut device.parameters);
+                }
             }
             'E' | 'G' | 'H' | 'F' => {
                 // Controlled sources: 4 nodes + gain
                 if tokens.len() < 6 {
-                    self.warnings.push(format!("Line {}: controlled source needs at least 6 tokens", line_number));
-                    for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
+                    self.warnings.push(format!(
+                        "Line {}: controlled source needs at least 6 tokens",
+                        line_number
+                    ));
+                    for tok in &tokens[1..] {
+                        device.nodes.push(tok.clone());
+                    }
                     return device;
                 }
-                for tok in &tokens[1..=4] { device.nodes.push(tok.clone()); }
+                for tok in &tokens[1..=4] {
+                    device.nodes.push(tok.clone());
+                }
                 device.model_or_value = tokens[5].clone();
-                for tok in &tokens[6..] { Self::parse_param(tok, &mut device.parameters); }
+                for tok in &tokens[6..] {
+                    Self::parse_param(tok, &mut device.parameters);
+                }
             }
             _ => {
                 // 2-node: R, C, L, D, V, I
                 if tokens.len() < 3 {
-                    self.warnings.push(format!("Line {}: device needs at least 3 tokens", line_number));
+                    self.warnings.push(format!(
+                        "Line {}: device needs at least 3 tokens",
+                        line_number
+                    ));
                     return device;
                 }
                 device.nodes.push(tokens[1].clone());
                 device.nodes.push(tokens[2].clone());
                 if tokens.len() >= 4 && !tokens[3].contains('=') {
                     device.model_or_value = tokens[3].clone();
-                    for tok in &tokens[4..] { Self::parse_param(tok, &mut device.parameters); }
+                    for tok in &tokens[4..] {
+                        Self::parse_param(tok, &mut device.parameters);
+                    }
                 } else {
-                    for tok in &tokens[3..] { Self::parse_param(tok, &mut device.parameters); }
+                    for tok in &tokens[3..] {
+                        Self::parse_param(tok, &mut device.parameters);
+                    }
                 }
             }
         }
@@ -410,7 +466,7 @@ pub fn pin_names_for_symbol(symbol_name: &str) -> Vec<&'static str> {
         "npn" | "pnp" => vec!["C", "B", "E"],
         "diode" => vec!["A", "K"],
         "vcvs" | "vccs" | "ccvs" | "cccs" => vec!["NP", "NN", "CP", "CN"],
-        _ => vec!["P", "N"],  // resistor, capacitor, inductor, vsource, isource
+        _ => vec!["P", "N"], // resistor, capacitor, inductor, vsource, isource
     }
 }
 
@@ -420,7 +476,8 @@ mod tests {
 
     #[test]
     fn test_parse_inverter() {
-        let spice = "* CMOS Inverter\nM1 out in vdd vdd pch W=20u L=1u\nM2 out in 0 0 nch W=10u L=1u\n";
+        let spice =
+            "* CMOS Inverter\nM1 out in vdd vdd pch W=20u L=1u\nM2 out in 0 0 nch W=10u L=1u\n";
         let mut parser = SpiceParser::new();
         let result = parser.parse(spice);
         assert_eq!(result.title, "CMOS Inverter");

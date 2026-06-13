@@ -1,5 +1,5 @@
+use crate::model::{builtin_symbols, Rect, Schematic};
 use serde::Serialize;
-use crate::model::{Schematic, Rect, builtin_symbols};
 
 #[derive(Debug, Serialize)]
 pub struct OverlapReport {

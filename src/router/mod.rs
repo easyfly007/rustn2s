@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use crate::model::{
+    builtin_symbols, Component, Junction, Label, PinDirection, Point, PowerSymbol, PowerType,
+    Schematic, SymbolDef, Wire,
+};
 use crate::parser::SpiceDevice;
 use crate::placer::{PlacementResult, SchematicPlacer};
-use crate::model::{
-    Schematic, Component, Wire, Label, PowerSymbol, Junction, PowerType, Point,
-    SymbolDef, PinDirection, builtin_symbols,
-};
+use std::collections::{HashMap, HashSet};
 
 mod astar;
 
@@ -98,7 +98,9 @@ impl SchematicRouter {
                 dp.symbol_name.clone()
             };
 
-            let mut props: Vec<(String, String)> = device.parameters.iter()
+            let mut props: Vec<(String, String)> = device
+                .parameters
+                .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !device.model_or_value.is_empty() {
@@ -116,31 +118,39 @@ impl SchematicRouter {
 
             // Map SPICE nodes to pin world positions
             // For X devices, use the subcircuit symbol's pin definitions
-            let sym_def = subckt_symbols.get(&sym_name)
+            let sym_def = subckt_symbols
+                .get(&sym_name)
                 .or_else(|| builtin.get(&sym_name));
 
             // For subcircuit instances, nodes map directly to ports by position
             if let Some(sym) = sym_def {
                 for (i, node) in device.nodes.iter().enumerate() {
-                    if i >= sym.pins.len() { break; }
+                    if i >= sym.pins.len() {
+                        break;
+                    }
                     let pin = &sym.pins[i];
                     let offset = pin.offset.transform(dp.rotation, dp.mirrored);
                     let pin_pos = dp.position + offset;
-                    let label_offset = label_offset_for_pin(
-                        pin.direction, dp.rotation, dp.mirrored,
-                    );
-                    net_connections.entry(node.clone()).or_default().push(PinInfo {
-                        position: pin_pos,
-                        label_offset,
-                    });
+                    let label_offset =
+                        label_offset_for_pin(pin.direction, dp.rotation, dp.mirrored);
+                    net_connections
+                        .entry(node.clone())
+                        .or_default()
+                        .push(PinInfo {
+                            position: pin_pos,
+                            label_offset,
+                        });
                 }
             } else {
                 // Fallback: place all nodes at component center (no direction)
                 for node in &device.nodes {
-                    net_connections.entry(node.clone()).or_default().push(PinInfo {
-                        position: dp.position,
-                        label_offset: Point::new(0.0, 0.0),
-                    });
+                    net_connections
+                        .entry(node.clone())
+                        .or_default()
+                        .push(PinInfo {
+                            position: dp.position,
+                            label_offset: Point::new(0.0, 0.0),
+                        });
                 }
             }
         }
@@ -169,21 +179,27 @@ impl SchematicRouter {
         // force medium-distance nets onto labels. Acts as an additional
         // floor — never goes below the user-supplied absolute threshold.
         let (bb_min, bb_max) = placement.bounding_rect;
-        let bbox_diag = ((bb_max.x - bb_min.x).powi(2)
-            + (bb_max.y - bb_min.y).powi(2)).sqrt();
-        let effective_threshold = opts.long_net_threshold
+        let bbox_diag = ((bb_max.x - bb_min.x).powi(2) + (bb_max.y - bb_min.y).powi(2)).sqrt();
+        let effective_threshold = opts
+            .long_net_threshold
             .max(bbox_diag * opts.adaptive_label_ratio);
 
         // Route each net
         for (net_name, pins) in &net_connections {
-            if pins.len() < 2 { continue; }
+            if pins.len() < 2 {
+                continue;
+            }
 
             if power_nets.contains(&net_name.to_lowercase()) || power_nets.contains(net_name) {
                 self.route_power_net(&mut schematic, net_name, pins, opts);
             } else {
                 self.route_signal_net(
-                    &mut schematic, net_name, pins, opts,
-                    effective_threshold, obstacle_grid.as_mut(),
+                    &mut schematic,
+                    net_name,
+                    pins,
+                    opts,
+                    effective_threshold,
+                    obstacle_grid.as_mut(),
                 );
             }
         }
@@ -192,7 +208,11 @@ impl SchematicRouter {
     }
 
     fn route_power_net(
-        &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
+        &self,
+        schematic: &mut Schematic,
+        net_name: &str,
+        pins: &[PinInfo],
+        opts: &RouterOptions,
     ) {
         let ptype = power_type_from_name(net_name);
         for pin in pins {
@@ -210,11 +230,17 @@ impl SchematicRouter {
     }
 
     fn route_signal_net(
-        &self, schematic: &mut Schematic, net_name: &str, pins: &[PinInfo], opts: &RouterOptions,
+        &self,
+        schematic: &mut Schematic,
+        net_name: &str,
+        pins: &[PinInfo],
+        opts: &RouterOptions,
         long_net_threshold: f64,
         grid: Option<&mut astar::ObstacleGrid>,
     ) {
-        if pins.len() < 2 { return; }
+        if pins.len() < 2 {
+            return;
+        }
 
         // MST operates on pin positions only
         let positions: Vec<Point> = pins.iter().map(|p| p.position).collect();
@@ -254,16 +280,16 @@ impl SchematicRouter {
                 let l_route = l_route_best(from, to, &schematic.wires);
                 let wire_pts = match grid_ref.as_deref() {
                     Some(g) if !g.polyline_clear(&l_route) => {
-                        astar::find_path(
-                            g, from, to,
-                            opts.bend_penalty, opts.crossing_penalty,
-                        ).unwrap_or(l_route)
+                        astar::find_path(g, from, to, opts.bend_penalty, opts.crossing_penalty)
+                            .unwrap_or(l_route)
                     }
                     _ => l_route,
                 };
                 let clean: Vec<Point> = snap_and_dedup(&wire_pts, opts.grid_size);
                 if clean.len() >= 2 {
-                    schematic.wires.push(Wire { points: clean.clone() });
+                    schematic.wires.push(Wire {
+                        points: clean.clone(),
+                    });
                     // Mark this wire's cells with their orientation so
                     // subsequent A* searches can avoid creating crossings.
                     if let Some(g) = grid_ref.as_deref_mut() {
@@ -296,7 +322,9 @@ impl SchematicRouter {
             // zero (fallback path — label coincides with pin).
             let pin_snapped = pin.position.snap_to_grid(opts.grid_size);
             if !close(&pin_snapped, &label_pos) {
-                schematic.wires.push(Wire { points: vec![pin_snapped, label_pos] });
+                schematic.wires.push(Wire {
+                    points: vec![pin_snapped, label_pos],
+                });
             }
         }
 
@@ -322,17 +350,20 @@ fn label_offset_for_pin(dir: PinDirection, rotation: i32, mirrored: bool) -> Poi
     // Magnitude: label rect is 50 wide × 16 tall, so 30 along the horizontal
     // axis and 15 along the vertical axis clear the pin stub comfortably.
     let raw = match dir {
-        PinDirection::Left  => Point::new(-30.0, 0.0),
-        PinDirection::Right => Point::new( 30.0, 0.0),
-        PinDirection::Up    => Point::new(  0.0, -15.0),
-        PinDirection::Down  => Point::new(  0.0,  15.0),
+        PinDirection::Left => Point::new(-30.0, 0.0),
+        PinDirection::Right => Point::new(30.0, 0.0),
+        PinDirection::Up => Point::new(0.0, -15.0),
+        PinDirection::Down => Point::new(0.0, 15.0),
     };
     raw.transform(rotation, mirrored)
 }
 
 fn power_type_from_name(name: &str) -> PowerType {
     let lower = name.to_lowercase();
-    if matches!(lower.as_str(), "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss") {
+    if matches!(
+        lower.as_str(),
+        "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss"
+    ) {
         PowerType::GND
     } else if matches!(lower.as_str(), "vdd" | "vdd!" | "vcc" | "vcc!" | "avdd") {
         PowerType::VDD
@@ -440,7 +471,9 @@ fn minimum_spanning_tree(pins: &[Point]) -> Vec<(usize, usize)> {
                 best = j;
             }
         }
-        if best == usize::MAX { break; }
+        if best == usize::MAX {
+            break;
+        }
 
         in_tree[best] = true;
         edges.push((min_edge[best], best));
@@ -478,7 +511,9 @@ fn snap_and_dedup(pts: &[Point], grid: f64) -> Vec<Point> {
 mod tests {
     use super::*;
 
-    fn p(x: f64, y: f64) -> Point { Point::new(x, y) }
+    fn p(x: f64, y: f64) -> Point {
+        Point::new(x, y)
+    }
 
     // ---- power_type_from_name ----
 
@@ -516,7 +551,11 @@ mod tests {
         // A "Right" pin (offset (30, 0)) rotated +90° → (0, 30) approximately.
         let off = label_offset_for_pin(PinDirection::Right, 90, false);
         assert!(off.x.abs() < 1e-6, "x should be ~0, got {}", off.x);
-        assert!((off.y - 30.0).abs() < 1e-6, "y should be ~30, got {}", off.y);
+        assert!(
+            (off.y - 30.0).abs() < 1e-6,
+            "y should be ~30, got {}",
+            off.y
+        );
     }
 
     #[test]
@@ -550,13 +589,33 @@ mod tests {
     #[test]
     fn segments_cross_interior_only() {
         // Cross at (5,5): both interior
-        assert!(segments_cross(&p(0.0, 5.0), &p(10.0, 5.0), &p(5.0, 0.0), &p(5.0, 10.0)));
+        assert!(segments_cross(
+            &p(0.0, 5.0),
+            &p(10.0, 5.0),
+            &p(5.0, 0.0),
+            &p(5.0, 10.0)
+        ));
         // Touch at endpoint: not a cross
-        assert!(!segments_cross(&p(0.0, 0.0), &p(5.0, 0.0), &p(5.0, 0.0), &p(5.0, 10.0)));
+        assert!(!segments_cross(
+            &p(0.0, 0.0),
+            &p(5.0, 0.0),
+            &p(5.0, 0.0),
+            &p(5.0, 10.0)
+        ));
         // Parallel: no cross
-        assert!(!segments_cross(&p(0.0, 0.0), &p(10.0, 0.0), &p(0.0, 5.0), &p(10.0, 5.0)));
+        assert!(!segments_cross(
+            &p(0.0, 0.0),
+            &p(10.0, 0.0),
+            &p(0.0, 5.0),
+            &p(10.0, 5.0)
+        ));
         // Disjoint: no cross
-        assert!(!segments_cross(&p(0.0, 0.0), &p(1.0, 0.0), &p(5.0, 5.0), &p(6.0, 5.0)));
+        assert!(!segments_cross(
+            &p(0.0, 0.0),
+            &p(1.0, 0.0),
+            &p(5.0, 5.0),
+            &p(6.0, 5.0)
+        ));
     }
 
     // ---- l_route_best ----
@@ -585,7 +644,9 @@ mod tests {
         // ... but it would only touch endpoints. Let's make the obstacle vertical:
         // existing vertical wire from (5, -5) to (5, 5) crosses the H-first
         // horizontal segment (0,0)-(10,0) at (5, 0) — interior of both.
-        let obstacle = Wire { points: vec![p(5.0, -5.0), p(5.0, 5.0)] };
+        let obstacle = Wire {
+            points: vec![p(5.0, -5.0), p(5.0, 5.0)],
+        };
         let route = l_route_best(p(0.0, 0.0), p(10.0, 10.0), &[obstacle]);
         // Should have picked V-first: (0,0) → (0,10) → (10,10)
         assert_eq!(route, vec![p(0.0, 0.0), p(0.0, 10.0), p(10.0, 10.0)]);
@@ -612,9 +673,10 @@ mod tests {
         let pts = [p(0.0, 0.0), p(10.0, 0.0), p(110.0, 0.0)];
         let edges = minimum_spanning_tree(&pts);
         assert_eq!(edges.len(), 2);
-        let mut s: Vec<(usize, usize)> = edges.iter().map(|&(a, b)| {
-            if a < b { (a, b) } else { (b, a) }
-        }).collect();
+        let mut s: Vec<(usize, usize)> = edges
+            .iter()
+            .map(|&(a, b)| if a < b { (a, b) } else { (b, a) })
+            .collect();
         s.sort();
         assert_eq!(s, vec![(0, 1), (1, 2)]);
     }
@@ -626,7 +688,8 @@ mod tests {
         let pts = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)];
         let edges = minimum_spanning_tree(&pts);
         assert_eq!(edges.len(), 3);
-        let total: f64 = edges.iter()
+        let total: f64 = edges
+            .iter()
             .map(|&(a, b)| pts[a].distance_to(&pts[b]))
             .sum();
         assert!((total - 30.0).abs() < 1e-6, "MST total = {}", total);

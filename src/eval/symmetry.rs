@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde::Serialize;
 use crate::model::Schematic;
+use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 pub struct SymmetryReport {
@@ -31,7 +31,9 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
         }
         let mut key_parts = vec![comp.symbol_name.clone()];
         // Sort properties for stable key
-        let mut props: Vec<(&str, &str)> = comp.properties.iter()
+        let mut props: Vec<(&str, &str)> = comp
+            .properties
+            .iter()
             .filter(|(k, _)| matches!(k.as_str(), "W" | "L" | "model"))
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
@@ -97,7 +99,10 @@ mod tests {
             position: Point::new(x, y),
             rotation: 0,
             mirrored: false,
-            properties: props.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            properties: props
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         }
     }
 
@@ -112,8 +117,10 @@ mod tests {
     fn singletons_dont_form_pairs() {
         // One nmos with W=1u, one pmos with W=1u → different symbol → not a pair.
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "1u"), ("L", "1u")]));
-        s.components.push(comp("M2", "pmos4", 100.0, 0.0, &[("W", "1u"), ("L", "1u")]));
+        s.components
+            .push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "1u"), ("L", "1u")]));
+        s.components
+            .push(comp("M2", "pmos4", 100.0, 0.0, &[("W", "1u"), ("L", "1u")]));
         let r = check(&s);
         assert!(r.matched_pairs.is_empty());
     }
@@ -122,8 +129,15 @@ mod tests {
     fn aligned_pair_scores_one() {
         // Two identical nmos at same y → perfect symmetry.
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "nmos4", -50.0, 0.0, &[("W", "10u"), ("L", "1u")]));
-        s.components.push(comp("M2", "nmos4",  50.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp(
+            "M1",
+            "nmos4",
+            -50.0,
+            0.0,
+            &[("W", "10u"), ("L", "1u")],
+        ));
+        s.components
+            .push(comp("M2", "nmos4", 50.0, 0.0, &[("W", "10u"), ("L", "1u")]));
         let r = check(&s);
         assert_eq!(r.matched_pairs.len(), 1);
         assert_eq!(r.matched_pairs[0].y_diff, 0.0);
@@ -135,8 +149,15 @@ mod tests {
     fn misaligned_pair_scores_lower() {
         // Same x_diff = 100 and y_diff = 100 → max_dim = 100, score = 1 - 100/100 = 0.0
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "nmos4",   0.0,   0.0, &[("W", "10u"), ("L", "1u")]));
-        s.components.push(comp("M2", "nmos4", 100.0, 100.0, &[("W", "10u"), ("L", "1u")]));
+        s.components
+            .push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp(
+            "M2",
+            "nmos4",
+            100.0,
+            100.0,
+            &[("W", "10u"), ("L", "1u")],
+        ));
         let r = check(&s);
         assert_eq!(r.matched_pairs.len(), 1);
         assert_eq!(r.matched_pairs[0].y_diff, 100.0);
@@ -147,8 +168,15 @@ mod tests {
     fn property_differences_break_pairing() {
         // Two nmos with different W → not the same key, so no pair.
         let mut s = Schematic::new("");
-        s.components.push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "10u"), ("L", "1u")]));
-        s.components.push(comp("M2", "nmos4", 100.0, 0.0, &[("W", "20u"), ("L", "1u")]));
+        s.components
+            .push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp(
+            "M2",
+            "nmos4",
+            100.0,
+            0.0,
+            &[("W", "20u"), ("L", "1u")],
+        ));
         let r = check(&s);
         assert!(r.matched_pairs.is_empty());
     }
@@ -158,8 +186,13 @@ mod tests {
         // 3 identical devices → group size != 2 → not scored.
         let mut s = Schematic::new("");
         for (i, x) in [-100.0, 0.0, 100.0].iter().enumerate() {
-            s.components.push(comp(&format!("M{}", i + 1), "nmos4", *x, 0.0,
-                &[("W", "10u"), ("L", "1u")]));
+            s.components.push(comp(
+                &format!("M{}", i + 1),
+                "nmos4",
+                *x,
+                0.0,
+                &[("W", "10u"), ("L", "1u")],
+            ));
         }
         let r = check(&s);
         assert!(r.matched_pairs.is_empty());

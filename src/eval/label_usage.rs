@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde::Serialize;
 use crate::model::Schematic;
+use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 pub struct LabelUsageReport {
@@ -51,10 +51,15 @@ mod tests {
     fn schematic_of(labels: &[(&str, f64, f64)], wire_count: usize) -> Schematic {
         let mut s = Schematic::new("");
         for &(name, x, y) in labels {
-            s.labels.push(Label { name: name.into(), position: Point::new(x, y) });
+            s.labels.push(Label {
+                name: name.into(),
+                position: Point::new(x, y),
+            });
         }
         for _ in 0..wire_count {
-            s.wires.push(Wire { points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)] });
+            s.wires.push(Wire {
+                points: vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)],
+            });
         }
         s
     }
@@ -72,7 +77,10 @@ mod tests {
     #[test]
     fn label_pairs_counts_names_with_at_least_two_occurrences() {
         // "out" appears 2x → counts as a pair; "lone" appears 1x → not a pair.
-        let s = schematic_of(&[("out", 0.0, 0.0), ("out", 50.0, 0.0), ("lone", 0.0, 50.0)], 2);
+        let s = schematic_of(
+            &[("out", 0.0, 0.0), ("out", 50.0, 0.0), ("lone", 0.0, 50.0)],
+            2,
+        );
         let r = check(&s);
         assert_eq!(r.total_labels, 3);
         assert_eq!(r.unique_label_names, 2);

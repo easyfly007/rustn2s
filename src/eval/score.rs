@@ -1,5 +1,5 @@
-use serde::Serialize;
 use super::EvalReport;
+use serde::Serialize;
 
 /// Weights for combining individual metrics into a single quality score.
 /// Each weight is in [0, 1] and they sum to 1.0.
@@ -63,9 +63,15 @@ impl SafetyReport {
     /// Names of the failing constraints (empty when `passes()` is true).
     pub fn failures(&self) -> Vec<&'static str> {
         let mut out = Vec::new();
-        if !self.no_overlap { out.push("overlap"); }
-        if !self.power_convention_clean { out.push("power_convention"); }
-        if !self.symmetry_clean { out.push("symmetry"); }
+        if !self.no_overlap {
+            out.push("overlap");
+        }
+        if !self.power_convention_clean {
+            out.push("power_convention");
+        }
+        if !self.symmetry_clean {
+            out.push("symmetry");
+        }
         out
     }
 }
@@ -87,7 +93,12 @@ impl QualityProfile {
     /// lexicographic comparisons. Order is canonical and stable so
     /// callers can sort or compare profiles without naming fields.
     pub fn as_array(&self) -> [f64; 4] {
-        [self.aspect_ratio, self.crossings, self.wire_length, self.label_ratio]
+        [
+            self.aspect_ratio,
+            self.crossings,
+            self.wire_length,
+            self.label_ratio,
+        ]
     }
 
     /// Lexicographic minimum across all four sub-scores. Returns the
@@ -133,10 +144,13 @@ impl QualityProfile {
     /// consumers — see docs/metric_reform.md step 7.
     pub fn quality_score(&self, weights: &ScoreWeights) -> f64 {
         let total = weights.crossings + weights.wire_length + weights.label_ratio;
-        if total <= 0.0 { return 1.0; }
-        (weights.crossings  * self.crossings
-         + weights.wire_length * self.wire_length
-         + weights.label_ratio * self.label_ratio) / total
+        if total <= 0.0 {
+            return 1.0;
+        }
+        (weights.crossings * self.crossings
+            + weights.wire_length * self.wire_length
+            + weights.label_ratio * self.label_ratio)
+            / total
     }
 }
 
@@ -171,7 +185,11 @@ pub fn compute_profile(report: &EvalReport) -> (SafetyReport, QualityProfile) {
 /// Higher is better.
 pub fn compute_score(report: &EvalReport, weights: &ScoreWeights) -> ScoreBreakdown {
     // 1. Overlap: 1.0 if zero overlaps, 0.0 if any
-    let overlap_score = if report.component_overlap.overlap_count == 0 { 1.0 } else { 0.0 };
+    let overlap_score = if report.component_overlap.overlap_count == 0 {
+        1.0
+    } else {
+        0.0
+    };
 
     // 2. Crossings: 1.0 if zero, decays with count
     let crossings_score = 1.0 / (1.0 + report.wire_crossings.crossing_count as f64);
@@ -204,7 +222,11 @@ pub fn compute_score(report: &EvalReport, weights: &ScoreWeights) -> ScoreBreakd
     //    Score 1.0 when ratio = 0, decays as more labels are used.
     let lr = report.label_usage.label_to_wire_ratio;
     let label_ratio_score = if lr <= 0.0 || lr.is_infinite() {
-        if report.label_usage.direct_wires > 0 { 1.0 } else { 0.5 }
+        if report.label_usage.direct_wires > 0 {
+            1.0
+        } else {
+            0.5
+        }
     } else {
         1.0 / (1.0 + lr * 2.0)
     };
@@ -265,7 +287,10 @@ pub fn suggest_tuning(
                 parameter: "layer_spacing".into(),
                 current_value: layer_spacing,
                 suggested_value: round1(layer_spacing * factor),
-                reason: format!("Aspect ratio {:.1} is too tall; increase horizontal spread", ar),
+                reason: format!(
+                    "Aspect ratio {:.1} is too tall; increase horizontal spread",
+                    ar
+                ),
             });
             // Also reduce device spacing to compress vertically
             advice.push(TuningAdvice {
@@ -281,7 +306,10 @@ pub fn suggest_tuning(
                 parameter: "layer_spacing".into(),
                 current_value: layer_spacing,
                 suggested_value: round1((layer_spacing / factor).max(100.0)),
-                reason: format!("Aspect ratio {:.1} is too wide; reduce horizontal spread", ar),
+                reason: format!(
+                    "Aspect ratio {:.1} is too wide; reduce horizontal spread",
+                    ar
+                ),
             });
         }
     }
@@ -292,8 +320,10 @@ pub fn suggest_tuning(
             parameter: "block_spacing".into(),
             current_value: block_spacing,
             suggested_value: round1(block_spacing * 1.5),
-            reason: format!("{} component overlaps detected; increase block spacing",
-                report.component_overlap.overlap_count),
+            reason: format!(
+                "{} component overlaps detected; increase block spacing",
+                report.component_overlap.overlap_count
+            ),
         });
         advice.push(TuningAdvice {
             parameter: "device_spacing".into(),
@@ -309,8 +339,10 @@ pub fn suggest_tuning(
             parameter: "label_threshold".into(),
             current_value: label_threshold,
             suggested_value: round1(label_threshold * 1.5),
-            reason: format!("{} label pairs used; increase threshold for more direct wires",
-                report.label_usage.label_pairs),
+            reason: format!(
+                "{} label pairs used; increase threshold for more direct wires",
+                report.label_usage.label_pairs
+            ),
         });
     }
 
@@ -345,27 +377,53 @@ mod tests {
                 orphan_labels: vec![],
                 duplicate_label_positions: 0,
             },
-            component_overlap: OverlapReport { overlap_count: 0, overlapping_pairs: vec![] },
-            wire_crossings: WireCrossingReport { crossing_count: 0, crossings: vec![] },
+            component_overlap: OverlapReport {
+                overlap_count: 0,
+                overlapping_pairs: vec![],
+            },
+            wire_crossings: WireCrossingReport {
+                crossing_count: 0,
+                crossings: vec![],
+            },
             wire_length: WireLengthReport {
-                total_length: 100.0, wire_count: 1, avg_length: 100.0,
-                max_length: 100.0, min_length: 100.0,
+                total_length: 100.0,
+                wire_count: 1,
+                avg_length: 100.0,
+                max_length: 100.0,
+                min_length: 100.0,
             },
             wire_bends: WireBendReport {
-                total_bends: 0, wires_with_bends: 0, max_bends_per_wire: 0,
+                total_bends: 0,
+                wires_with_bends: 0,
+                max_bends_per_wire: 0,
             },
             bounding_box: BoundingBoxReport {
-                min_x: 0.0, min_y: 0.0, max_x: 100.0, max_y: 100.0,
-                width: 100.0, height: 100.0, area: 10000.0,
-                aspect_ratio: 1.0, component_count: 1,
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 100.0,
+                max_y: 100.0,
+                width: 100.0,
+                height: 100.0,
+                area: 10000.0,
+                aspect_ratio: 1.0,
+                component_count: 1,
             },
             label_usage: LabelUsageReport {
-                total_labels: 0, unique_label_names: 0, label_pairs: 0,
-                direct_wires: 1, label_to_wire_ratio: 0.0,
+                total_labels: 0,
+                unique_label_names: 0,
+                label_pairs: 0,
+                direct_wires: 1,
+                label_to_wire_ratio: 0.0,
             },
-            symmetry: SymmetryReport { matched_pairs: vec![], overall_score: 1.0 },
+            symmetry: SymmetryReport {
+                matched_pairs: vec![],
+                overall_score: 1.0,
+            },
             power_convention: PowerConventionReport {
-                pmos_count: 0, nmos_count: 0, violations: vec![], score: 1.0,
+                pmos_count: 0,
+                nmos_count: 0,
+                violations: vec![],
+                score: 1.0,
             },
         }
     }
@@ -373,8 +431,13 @@ mod tests {
     #[test]
     fn weights_default_sums_to_one() {
         let w = ScoreWeights::default();
-        let sum = w.overlap + w.crossings + w.aspect_ratio + w.wire_length
-            + w.label_ratio + w.symmetry + w.power_convention;
+        let sum = w.overlap
+            + w.crossings
+            + w.aspect_ratio
+            + w.wire_length
+            + w.label_ratio
+            + w.symmetry
+            + w.power_convention;
         assert!((sum - 1.0).abs() < 1e-9);
     }
 
@@ -419,23 +482,38 @@ mod tests {
         let mut r = perfect_report();
 
         r.bounding_box.aspect_ratio = 2.5;
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).aspect_ratio_score, 1.0);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).aspect_ratio_score,
+            1.0
+        );
 
         r.bounding_box.aspect_ratio = 5.0;
         // At ar=5.0: 1.0 - (5.0-2.5)/2.5 * 0.5 = 0.5
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).aspect_ratio_score, 0.5);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).aspect_ratio_score,
+            0.5
+        );
 
         r.bounding_box.aspect_ratio = 10.0;
         // At ar=10.0: 0.5 - (10-5)/5 * 0.3 = 0.2
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).aspect_ratio_score, 0.2);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).aspect_ratio_score,
+            0.2
+        );
 
         r.bounding_box.aspect_ratio = 50.0;
         // At ar=50: 0.2 - (50-10)/40 * 0.2 = 0.0
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).aspect_ratio_score, 0.0);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).aspect_ratio_score,
+            0.0
+        );
 
         r.bounding_box.aspect_ratio = 100.0;
         // Clamped at 0.0
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).aspect_ratio_score, 0.0);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).aspect_ratio_score,
+            0.0
+        );
     }
 
     #[test]
@@ -443,11 +521,17 @@ mod tests {
         // 1 component → ideal length = 100. Total 50 → ratio 0.5 < 1 → score 1.0.
         let mut r = perfect_report();
         r.wire_length.total_length = 50.0;
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).wire_length_score, 1.0);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).wire_length_score,
+            1.0
+        );
 
         // Total 200 → ratio 2 → score 0.5.
         r.wire_length.total_length = 200.0;
-        assert_eq!(compute_score(&r, &ScoreWeights::default()).wire_length_score, 0.5);
+        assert_eq!(
+            compute_score(&r, &ScoreWeights::default()).wire_length_score,
+            0.5
+        );
     }
 
     #[test]
@@ -468,9 +552,15 @@ mod tests {
         let advice = suggest_tuning(&r, &breakdown, 200.0, 100.0, 80.0, 300.0);
 
         // Should bump layer_spacing up and device_spacing down.
-        let layer = advice.iter().find(|a| a.parameter == "layer_spacing").unwrap();
+        let layer = advice
+            .iter()
+            .find(|a| a.parameter == "layer_spacing")
+            .unwrap();
         assert!(layer.suggested_value > layer.current_value);
-        let device = advice.iter().find(|a| a.parameter == "device_spacing").unwrap();
+        let device = advice
+            .iter()
+            .find(|a| a.parameter == "device_spacing")
+            .unwrap();
         assert!(device.suggested_value < device.current_value);
     }
 
@@ -481,9 +571,15 @@ mod tests {
         let breakdown = compute_score(&r, &ScoreWeights::default());
         let advice = suggest_tuning(&r, &breakdown, 200.0, 100.0, 80.0, 300.0);
 
-        let block = advice.iter().find(|a| a.parameter == "block_spacing").unwrap();
+        let block = advice
+            .iter()
+            .find(|a| a.parameter == "block_spacing")
+            .unwrap();
         assert!(block.suggested_value > block.current_value);
-        let device = advice.iter().find(|a| a.parameter == "device_spacing").unwrap();
+        let device = advice
+            .iter()
+            .find(|a| a.parameter == "device_spacing")
+            .unwrap();
         assert!(device.suggested_value > device.current_value);
     }
 
@@ -522,9 +618,9 @@ mod tests {
     fn quality_profile_worst_picks_minimum() {
         let q = QualityProfile {
             aspect_ratio: 0.9,
-            crossings:    0.4,
-            wire_length:  0.7,
-            label_ratio:  0.6,
+            crossings: 0.4,
+            wire_length: 0.7,
+            label_ratio: 0.6,
         };
         let (name, value) = q.worst();
         assert_eq!(name, "crossings");
@@ -535,10 +631,10 @@ mod tests {
     fn worst_quality_excludes_aspect_ratio() {
         // aspect_ratio is the lowest, but worst_quality skips it.
         let q = QualityProfile {
-            aspect_ratio: 0.20,  // shape signal — should be ignored
-            crossings:    0.45,
-            wire_length:  0.80,
-            label_ratio:  0.60,
+            aspect_ratio: 0.20, // shape signal — should be ignored
+            crossings: 0.45,
+            wire_length: 0.80,
+            label_ratio: 0.60,
         };
         // worst() includes ar → returns ("aspect_ratio", 0.20)
         assert_eq!(q.worst().0, "aspect_ratio");
@@ -551,23 +647,26 @@ mod tests {
     #[test]
     fn quality_score_excludes_aspect_ratio() {
         let q = QualityProfile {
-            aspect_ratio: 0.0,   // would tank the score if included
-            crossings:    1.0,
-            wire_length:  1.0,
-            label_ratio:  1.0,
+            aspect_ratio: 0.0, // would tank the score if included
+            crossings: 1.0,
+            wire_length: 1.0,
+            label_ratio: 1.0,
         };
         let s = q.quality_score(&ScoreWeights::default());
-        assert!((s - 1.0).abs() < 1e-9,
-            "quality_score should ignore aspect_ratio, got {}", s);
+        assert!(
+            (s - 1.0).abs() < 1e-9,
+            "quality_score should ignore aspect_ratio, got {}",
+            s
+        );
     }
 
     #[test]
     fn quality_score_renormalizes_remaining_weights() {
         let q = QualityProfile {
-            aspect_ratio: 0.5,   // ignored
-            crossings:    0.5,
-            wire_length:  0.5,
-            label_ratio:  0.5,
+            aspect_ratio: 0.5, // ignored
+            crossings: 0.5,
+            wire_length: 0.5,
+            label_ratio: 0.5,
         };
         // With default weights: crossings=0.15, wire_length=0.10,
         // label_ratio=0.10. Sum 0.35. Renormalized contributions all
@@ -580,9 +679,9 @@ mod tests {
     fn quality_profile_as_array_has_canonical_order() {
         let q = QualityProfile {
             aspect_ratio: 0.1,
-            crossings:    0.2,
-            wire_length:  0.3,
-            label_ratio:  0.4,
+            crossings: 0.2,
+            wire_length: 0.3,
+            label_ratio: 0.4,
         };
         let arr = q.as_array();
         assert_eq!(arr, [0.1, 0.2, 0.3, 0.4]);
@@ -593,9 +692,9 @@ mod tests {
         // The two functions derive Tier 2 from the same formulas, so
         // their outputs should agree on the four continuous metrics.
         let mut r = perfect_report();
-        r.bounding_box.aspect_ratio = 7.0;       // ar bracket 5..10
-        r.wire_crossings.crossing_count = 2;     // 1/3
-        r.wire_length.total_length = 200.0;      // ratio 2 (1 component → ideal 100)
+        r.bounding_box.aspect_ratio = 7.0; // ar bracket 5..10
+        r.wire_crossings.crossing_count = 2; // 1/3
+        r.wire_length.total_length = 200.0; // ratio 2 (1 component → ideal 100)
         r.label_usage.total_labels = 4;
         r.label_usage.label_pairs = 2;
         r.label_usage.label_to_wire_ratio = 2.0; // → 1/(1+4) = 0.2
@@ -604,8 +703,8 @@ mod tests {
         let (_safety, quality) = compute_profile(&r);
 
         assert!((quality.aspect_ratio - breakdown.aspect_ratio_score).abs() < 1e-9);
-        assert!((quality.crossings    - breakdown.crossings_score).abs()    < 1e-9);
-        assert!((quality.wire_length  - breakdown.wire_length_score).abs()  < 1e-9);
-        assert!((quality.label_ratio  - breakdown.label_ratio_score).abs()  < 1e-9);
+        assert!((quality.crossings - breakdown.crossings_score).abs() < 1e-9);
+        assert!((quality.wire_length - breakdown.wire_length_score).abs() < 1e-9);
+        assert!((quality.label_ratio - breakdown.label_ratio_score).abs() < 1e-9);
     }
 }
