@@ -503,7 +503,7 @@ mod tests {
         r.component_overlap.overlap_count = 1;
         let (safety, _q) = compute_profile(&r);
         assert!(!safety.passes());
-        assert!(safety.no_overlap == false);
+        assert!(!safety.no_overlap);
         assert_eq!(safety.failures(), vec!["overlap"]);
     }
 

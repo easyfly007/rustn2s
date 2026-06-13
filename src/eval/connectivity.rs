@@ -121,11 +121,11 @@ pub fn check(parse_result: &ParseResult, schematic: &Schematic) -> ConnectivityR
             // but at least flag completely unrepresented nets
             let has_wire_connection = schematic.components.iter().any(|c| {
                 if let Some(sym) = symbols.get(&c.symbol_name) {
-                    sym.pins.iter().enumerate().any(|(_, pin)| {
+                    sym.pins.iter().any(|pin| {
                         let wp = c.position + pin.offset.transform(c.rotation, c.mirrored);
                         schematic.wires.iter().any(|w| {
-                            w.points.first().map_or(false, |p| close_enough(p, &wp))
-                                || w.points.last().map_or(false, |p| close_enough(p, &wp))
+                            w.points.first().is_some_and(|p| close_enough(p, &wp))
+                                || w.points.last().is_some_and(|p| close_enough(p, &wp))
                         })
                     })
                 } else {

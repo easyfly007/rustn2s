@@ -69,6 +69,31 @@ fn is_endpoint(pt: &Point, a: &Point, b: &Point) -> bool {
     close(pt, a) || close(pt, b)
 }
 
+/// Test if two line segments intersect, return the intersection point if they do.
+/// Uses the standard cross-product method.
+fn segment_intersection(p1: &Point, p2: &Point, p3: &Point, p4: &Point) -> Option<Point> {
+    let d1x = p2.x - p1.x;
+    let d1y = p2.y - p1.y;
+    let d2x = p4.x - p3.x;
+    let d2y = p4.y - p3.y;
+
+    let denom = d1x * d2y - d1y * d2x;
+    if denom.abs() < 1e-10 {
+        return None; // Parallel or collinear
+    }
+
+    let t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / denom;
+    let u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
+
+    // Strict interior intersection (exclude endpoints to avoid double-counting)
+    let eps = 0.001;
+    if t > eps && t < 1.0 - eps && u > eps && u < 1.0 - eps {
+        Some(Point::new(p1.x + t * d1x, p1.y + t * d1y))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,30 +160,5 @@ mod tests {
         ] };
         let r = check(&schematic_with(vec![w], vec![]));
         assert_eq!(r.crossing_count, 0);
-    }
-}
-
-/// Test if two line segments intersect, return the intersection point if they do.
-/// Uses the standard cross-product method.
-fn segment_intersection(p1: &Point, p2: &Point, p3: &Point, p4: &Point) -> Option<Point> {
-    let d1x = p2.x - p1.x;
-    let d1y = p2.y - p1.y;
-    let d2x = p4.x - p3.x;
-    let d2y = p4.y - p3.y;
-
-    let denom = d1x * d2y - d1y * d2x;
-    if denom.abs() < 1e-10 {
-        return None; // Parallel or collinear
-    }
-
-    let t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / denom;
-    let u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
-
-    // Strict interior intersection (exclude endpoints to avoid double-counting)
-    let eps = 0.001;
-    if t > eps && t < 1.0 - eps && u > eps && u < 1.0 - eps {
-        Some(Point::new(p1.x + t * d1x, p1.y + t * d1y))
-    } else {
-        None
     }
 }

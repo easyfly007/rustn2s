@@ -14,6 +14,7 @@ use placer::{SchematicPlacer, PlacerOptions};
 use router::{SchematicRouter, RouterOptions};
 
 /// Options for the full N2S conversion pipeline.
+#[derive(Default)]
 pub struct ConvertOptions {
     pub placer: PlacerOptions,
     pub router: RouterOptions,
@@ -21,17 +22,6 @@ pub struct ConvertOptions {
     /// When true, render subcircuit instances as boxes with ports
     /// instead of expanding them to individual devices.
     pub hierarchical: bool,
-}
-
-impl Default for ConvertOptions {
-    fn default() -> Self {
-        Self {
-            placer: PlacerOptions::default(),
-            router: RouterOptions::default(),
-            cluster: ClusterOptions::default(),
-            hierarchical: false,
-        }
-    }
 }
 
 /// Result of the full conversion pipeline.

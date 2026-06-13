@@ -516,8 +516,8 @@ impl SchematicPlacer {
         }
 
         let mut queue: VecDeque<usize> = VecDeque::new();
-        for i in 0..n {
-            if in_deg[i] == 0 { queue.push_back(i); }
+        for (i, &deg) in in_deg.iter().enumerate() {
+            if deg == 0 { queue.push_back(i); }
         }
 
         let mut topo = Vec::with_capacity(n);

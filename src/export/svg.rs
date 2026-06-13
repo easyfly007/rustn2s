@@ -219,7 +219,7 @@ fn render_grid(svg: &mut String, w: f64, h: f64, opts: &SvgOptions) {
     while gx < w {
         let mut gy = 0.0;
         while gy < h {
-            write!(svg, "  <circle cx=\"{gx}\" cy=\"{gy}\" r=\"0.5\" fill=\"{}\"/>\n",
+            writeln!(svg, "  <circle cx=\"{gx}\" cy=\"{gy}\" r=\"0.5\" fill=\"{}\"/>",
                 opts.theme.grid_color).unwrap();
             gy += spacing;
         }
@@ -259,7 +259,7 @@ fn render_components(
                 let wp = pin.offset.transform(comp.rotation, comp.mirrored);
                 let px = cx + wp.x * sc;
                 let py = cy + wp.y * sc;
-                write!(svg, "  <circle cx=\"{px}\" cy=\"{py}\" r=\"2.5\" class=\"pin\"/>\n").unwrap();
+                writeln!(svg, "  <circle cx=\"{px}\" cy=\"{py}\" r=\"2.5\" class=\"pin\"/>").unwrap();
 
                 if opts.show_pin_names {
                     let (name_x, anchor) = match pin.direction {
@@ -272,24 +272,24 @@ fn render_components(
                         crate::model::PinDirection::Down => py + 10.0,
                         _ => py,
                     };
-                    write!(svg, "  <text x=\"{name_x}\" y=\"{name_y}\" class=\"pin-name\" \
-                        text-anchor=\"{anchor}\">{}</text>\n", pin.name).unwrap();
+                    writeln!(svg, "  <text x=\"{name_x}\" y=\"{name_y}\" class=\"pin-name\" \
+                        text-anchor=\"{anchor}\">{}</text>", pin.name).unwrap();
                 }
             }
         } else {
             // Fallback rectangle
             let rw = 20.0 * sc;
             let rh = 15.0 * sc;
-            write!(svg, "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" class=\"comp-fill\"/>\n",
+            writeln!(svg, "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" class=\"comp-fill\"/>",
                 cx - rw, cy - rh, rw * 2.0, rh * 2.0).unwrap();
         }
 
         if opts.show_instance_names && !comp.instance_name.is_empty() {
-            write!(svg, "  <text x=\"{cx}\" y=\"{}\" class=\"name\">{}</text>\n",
+            writeln!(svg, "  <text x=\"{cx}\" y=\"{}\" class=\"name\">{}</text>",
                 cy - 3.0 * sc, comp.instance_name).unwrap();
         }
         if opts.show_symbol_names {
-            write!(svg, "  <text x=\"{cx}\" y=\"{}\" class=\"sub\">{}</text>\n",
+            writeln!(svg, "  <text x=\"{cx}\" y=\"{}\" class=\"sub\">{}</text>",
                 cy + 10.0 * sc, comp.symbol_name.to_uppercase()).unwrap();
         }
     }
@@ -307,8 +307,8 @@ fn render_graphic(
         SymbolGraphic::Line { x1, y1, x2, y2 } => {
             let p1 = Point::new(*x1, *y1).transform(rot, mir);
             let p2 = Point::new(*x2, *y2).transform(rot, mir);
-            write!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
-                stroke=\"{stroke}\" stroke-width=\"1.5\"/>\n",
+            writeln!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
+                stroke=\"{stroke}\" stroke-width=\"1.5\"/>",
                 cx + p1.x * sc, cy + p1.y * sc, cx + p2.x * sc, cy + p2.y * sc).unwrap();
         }
         SymbolGraphic::Rect { x, y, width, height, filled } => {
@@ -317,8 +317,8 @@ fn render_graphic(
             let c2 = Point::new(x + width, y + height).transform(rot, mir);
             let c3 = Point::new(*x, y + height).transform(rot, mir);
             let f = if *filled { fill.as_str() } else { "none" };
-            write!(svg, "  <polygon points=\"{},{} {},{} {},{} {},{}\" \
-                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>\n",
+            writeln!(svg, "  <polygon points=\"{},{} {},{} {},{} {},{}\" \
+                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>",
                 cx + c0.x * sc, cy + c0.y * sc,
                 cx + c1.x * sc, cy + c1.y * sc,
                 cx + c2.x * sc, cy + c2.y * sc,
@@ -327,8 +327,8 @@ fn render_graphic(
         SymbolGraphic::Circle { cx: gcx, cy: gcy, radius, filled } => {
             let center = Point::new(*gcx, *gcy).transform(rot, mir);
             let f = if *filled { fill.as_str() } else { "none" };
-            write!(svg, "  <circle cx=\"{}\" cy=\"{}\" r=\"{}\" \
-                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>\n",
+            writeln!(svg, "  <circle cx=\"{}\" cy=\"{}\" r=\"{}\" \
+                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>",
                 cx + center.x * sc, cy + center.y * sc, radius * sc).unwrap();
         }
         SymbolGraphic::Arc { cx: gcx, cy: gcy, radius, start_angle, span_angle } => {
@@ -346,8 +346,8 @@ fn render_graphic(
             let la = if sp.abs() > 180.0 { 1 } else { 0 };
             let sw = if sp > 0.0 { 0 } else { 1 };
             let r = radius * sc;
-            write!(svg, "  <path d=\"M {sx} {sy} A {r} {r} 0 {la} {sw} {ex} {ey}\" \
-                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"none\"/>\n").unwrap();
+            writeln!(svg, "  <path d=\"M {sx} {sy} A {r} {r} 0 {la} {sw} {ex} {ey}\" \
+                stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"none\"/>").unwrap();
         }
         SymbolGraphic::Polyline { points, filled } => {
             if points.is_empty() { return; }
@@ -359,12 +359,12 @@ fn render_graphic(
                 let tp = pt.transform(rot, mir);
                 write!(svg, "{},{}", cx + tp.x * sc, cy + tp.y * sc).unwrap();
             }
-            write!(svg, "\" stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>\n").unwrap();
+            writeln!(svg, "\" stroke=\"{stroke}\" stroke-width=\"1.5\" fill=\"{f}\"/>").unwrap();
         }
         SymbolGraphic::Text { x, y, text, font_size } => {
             let tp = Point::new(*x, *y).transform(rot, mir);
-            write!(svg, "  <text x=\"{}\" y=\"{}\" font-family=\"monospace\" \
-                fill=\"{}\" font-size=\"{font_size}px\" dominant-baseline=\"central\">{text}</text>\n",
+            writeln!(svg, "  <text x=\"{}\" y=\"{}\" font-family=\"monospace\" \
+                fill=\"{}\" font-size=\"{font_size}px\" dominant-baseline=\"central\">{text}</text>",
                 cx + tp.x * sc, cy + tp.y * sc, opts.theme.text_color).unwrap();
         }
     }
@@ -379,26 +379,26 @@ fn render_power_symbols(svg: &mut String, sch: &Schematic, ox: f64, oy: f64, opt
         match ps.power_type {
             PowerType::GND => {
                 let c = &opts.theme.gnd_color;
-                write!(svg, "  <line x1=\"{px}\" y1=\"{}\" x2=\"{px}\" y2=\"{py}\" \
-                    stroke=\"{c}\" stroke-width=\"1.5\"/>\n", py - 8.0 * sc).unwrap();
-                write!(svg, "  <line x1=\"{}\" y1=\"{py}\" x2=\"{}\" y2=\"{py}\" \
-                    stroke=\"{c}\" stroke-width=\"2\"/>\n", px - 8.0 * sc, px + 8.0 * sc).unwrap();
-                write!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
-                    stroke=\"{c}\" stroke-width=\"1.5\"/>\n",
+                writeln!(svg, "  <line x1=\"{px}\" y1=\"{}\" x2=\"{px}\" y2=\"{py}\" \
+                    stroke=\"{c}\" stroke-width=\"1.5\"/>", py - 8.0 * sc).unwrap();
+                writeln!(svg, "  <line x1=\"{}\" y1=\"{py}\" x2=\"{}\" y2=\"{py}\" \
+                    stroke=\"{c}\" stroke-width=\"2\"/>", px - 8.0 * sc, px + 8.0 * sc).unwrap();
+                writeln!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
+                    stroke=\"{c}\" stroke-width=\"1.5\"/>",
                     px - 5.0 * sc, py + 3.0 * sc, px + 5.0 * sc, py + 3.0 * sc).unwrap();
-                write!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
-                    stroke=\"{c}\" stroke-width=\"1\"/>\n",
+                writeln!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
+                    stroke=\"{c}\" stroke-width=\"1\"/>",
                     px - 2.0 * sc, py + 6.0 * sc, px + 2.0 * sc, py + 6.0 * sc).unwrap();
-                write!(svg, "  <text x=\"{px}\" y=\"{}\" class=\"lbl\">{}</text>\n",
+                writeln!(svg, "  <text x=\"{px}\" y=\"{}\" class=\"lbl\">{}</text>",
                     py + 16.0 * sc, ps.net_name).unwrap();
             }
             _ => {
                 let c = &opts.theme.vdd_color;
-                write!(svg, "  <line x1=\"{px}\" y1=\"{}\" x2=\"{px}\" y2=\"{py}\" \
-                    stroke=\"{c}\" stroke-width=\"1.5\"/>\n", py + 8.0 * sc).unwrap();
-                write!(svg, "  <line x1=\"{}\" y1=\"{py}\" x2=\"{}\" y2=\"{py}\" \
-                    stroke=\"{c}\" stroke-width=\"2\"/>\n", px - 8.0 * sc, px + 8.0 * sc).unwrap();
-                write!(svg, "  <text x=\"{px}\" y=\"{}\" class=\"lbl\" fill=\"{c}\">{}</text>\n",
+                writeln!(svg, "  <line x1=\"{px}\" y1=\"{}\" x2=\"{px}\" y2=\"{py}\" \
+                    stroke=\"{c}\" stroke-width=\"1.5\"/>", py + 8.0 * sc).unwrap();
+                writeln!(svg, "  <line x1=\"{}\" y1=\"{py}\" x2=\"{}\" y2=\"{py}\" \
+                    stroke=\"{c}\" stroke-width=\"2\"/>", px - 8.0 * sc, px + 8.0 * sc).unwrap();
+                writeln!(svg, "  <text x=\"{px}\" y=\"{}\" class=\"lbl\" fill=\"{c}\">{}</text>",
                     py - 8.0 * sc, ps.net_name).unwrap();
             }
         }
@@ -410,11 +410,11 @@ fn render_labels(svg: &mut String, sch: &Schematic, ox: f64, oy: f64, opts: &Svg
     for label in &sch.labels {
         let lx = label.position.x * sc + ox;
         let ly = label.position.y * sc + oy;
-        write!(svg, "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" \
-            fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n",
+        writeln!(svg, "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" \
+            fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
             lx - 25.0 * sc, ly - 8.0 * sc, 50.0 * sc, 16.0 * sc,
             opts.theme.label_bg, opts.theme.label_color).unwrap();
-        write!(svg, "  <text x=\"{lx}\" y=\"{ly}\" class=\"lbl\">{}</text>\n", label.name).unwrap();
+        writeln!(svg, "  <text x=\"{lx}\" y=\"{ly}\" class=\"lbl\">{}</text>", label.name).unwrap();
     }
 }
 
@@ -423,7 +423,7 @@ fn render_junctions(svg: &mut String, sch: &Schematic, ox: f64, oy: f64, opts: &
     for j in &sch.junctions {
         let jx = j.position.x * sc + ox;
         let jy = j.position.y * sc + oy;
-        write!(svg, "  <circle cx=\"{jx}\" cy=\"{jy}\" r=\"{}\" class=\"junc\"/>\n", 4.0 * sc).unwrap();
+        writeln!(svg, "  <circle cx=\"{jx}\" cy=\"{jy}\" r=\"{}\" class=\"junc\"/>", 4.0 * sc).unwrap();
     }
 }
 
@@ -431,17 +431,17 @@ fn render_legend(svg: &mut String, _w: f64, h: f64, opts: &SvgOptions) {
     let t = &opts.theme;
     let lx = 15.0;
     let ly = h - 50.0;
-    write!(svg, "  <rect x=\"{lx}\" y=\"{ly}\" width=\"12\" height=\"12\" \
-        fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>\n", t.component_fill, t.component_stroke).unwrap();
-    write!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Component</text>\n",
+    writeln!(svg, "  <rect x=\"{lx}\" y=\"{ly}\" width=\"12\" height=\"12\" \
+        fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>", t.component_fill, t.component_stroke).unwrap();
+    writeln!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Component</text>",
         lx + 16.0, ly + 10.0).unwrap();
-    write!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" class=\"wire\"/>\n",
+    writeln!(svg, "  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" class=\"wire\"/>",
         lx + 80.0, ly + 6.0, lx + 92.0, ly + 6.0).unwrap();
-    write!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Wire</text>\n",
+    writeln!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Wire</text>",
         lx + 96.0, ly + 10.0).unwrap();
-    write!(svg, "  <circle cx=\"{}\" cy=\"{}\" r=\"3\" class=\"pin\"/>\n",
+    writeln!(svg, "  <circle cx=\"{}\" cy=\"{}\" r=\"3\" class=\"pin\"/>",
         lx + 140.0, ly + 6.0).unwrap();
-    write!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Pin</text>\n",
+    writeln!(svg, "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"start\">Pin</text>",
         lx + 147.0, ly + 10.0).unwrap();
 }
 

@@ -82,7 +82,7 @@ fn all_examples_pass_tier1_safety_metrics() {
     let examples = std::fs::read_dir("tests/examples")
         .expect("tests/examples must exist")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "sp"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "sp"))
         .map(|e| e.file_name().into_string().unwrap())
         .collect::<Vec<_>>();
 
@@ -117,7 +117,7 @@ fn all_examples_run_through_pipeline_and_eval() {
     let examples = std::fs::read_dir("tests/examples")
         .expect("tests/examples must exist")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |x| x == "sp"))
+        .filter(|e| e.path().extension().is_some_and(|x| x == "sp"))
         .map(|e| e.file_name().into_string().unwrap())
         .collect::<Vec<_>>();
     assert!(examples.len() >= 11, "expected ≥11 example netlists, found {}", examples.len());

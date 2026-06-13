@@ -344,7 +344,7 @@ pub mod builtin_symbols {
     pub fn create_subcircuit_symbol(subckt_name: &str, port_names: &[String]) -> SymbolDef {
         let n = port_names.len();
         // Split ports: first half on left, second half on right
-        let left_count = (n + 1) / 2;
+        let left_count = n.div_ceil(2);
         let right_count = n - left_count;
 
         let pin_spacing = 20.0;
@@ -364,11 +364,11 @@ pub mod builtin_symbols {
         });
 
         // Left-side ports
-        for i in 0..left_count {
+        for (i, port_name) in port_names.iter().enumerate().take(left_count) {
             let y = -half_h + pin_spacing * 0.5 + (i as f64) * pin_spacing + 5.0;
             let pin_x = -half_w - 15.0;
             pins.push(SymbolPin {
-                name: port_names[i].clone(),
+                name: port_name.clone(),
                 pin_number: (i + 1) as i32,
                 offset: Point::new(pin_x, y),
                 direction: PinDirection::Left,

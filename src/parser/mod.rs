@@ -35,6 +35,12 @@ pub struct SpiceParser {
     warnings: Vec<String>,
 }
 
+impl Default for SpiceParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpiceParser {
     pub fn new() -> Self {
         Self { warnings: Vec::new() }
@@ -61,11 +67,8 @@ impl SpiceParser {
         // First line is title (SPICE convention)
         let first = &merged[0];
         let start_idx;
-        if first.starts_with("* ") {
-            result.title = first[2..].trim().to_string();
-            start_idx = 1;
-        } else if first.starts_with('*') {
-            result.title = first[1..].trim().to_string();
+        if let Some(rest) = first.strip_prefix('*') {
+            result.title = rest.trim().to_string();
             start_idx = 1;
         } else if !first.starts_with('.') && !Self::is_device_line(first) {
             result.title = first.trim().to_string();
@@ -237,10 +240,10 @@ impl SpiceParser {
             if trimmed.is_empty() { continue; }
             if trimmed.starts_with('*') { continue; }
 
-            if trimmed.starts_with('+') {
+            if let Some(rest) = trimmed.strip_prefix('+') {
                 if let Some(last) = merged.last_mut() {
                     last.push(' ');
-                    last.push_str(trimmed[1..].trim());
+                    last.push_str(rest.trim());
                 }
                 continue;
             }
@@ -332,7 +335,7 @@ impl SpiceParser {
                     for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
                     return device;
                 }
-                for i in 1..=4 { device.nodes.push(tokens[i].clone()); }
+                for tok in &tokens[1..=4] { device.nodes.push(tok.clone()); }
                 device.model_or_value = tokens[5].clone();
                 for tok in &tokens[6..] { Self::parse_param(tok, &mut device.parameters); }
             }
@@ -343,7 +346,7 @@ impl SpiceParser {
                     for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
                     return device;
                 }
-                for i in 1..=3 { device.nodes.push(tokens[i].clone()); }
+                for tok in &tokens[1..=3] { device.nodes.push(tok.clone()); }
                 let mut next = 4;
                 // Check for 4-terminal BJT
                 if next < tokens.len() && !tokens[next].contains('=')
@@ -365,7 +368,7 @@ impl SpiceParser {
                     for tok in &tokens[1..] { device.nodes.push(tok.clone()); }
                     return device;
                 }
-                for i in 1..=4 { device.nodes.push(tokens[i].clone()); }
+                for tok in &tokens[1..=4] { device.nodes.push(tok.clone()); }
                 device.model_or_value = tokens[5].clone();
                 for tok in &tokens[6..] { Self::parse_param(tok, &mut device.parameters); }
             }

@@ -40,6 +40,12 @@ impl Default for ClusterOptions {
 
 pub struct CircuitAnalyzer;
 
+impl Default for CircuitAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircuitAnalyzer {
     pub fn new() -> Self { Self }
 
