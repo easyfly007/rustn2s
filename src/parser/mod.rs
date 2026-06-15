@@ -81,6 +81,7 @@ impl SpiceParser {
 
         let mut subckt_stack: Vec<SpiceSubcircuitDef> = Vec::new();
         let mut line_num = 0usize;
+        let mut in_control_block = false;
 
         for line in &merged[start_idx..] {
             line_num += 1;
@@ -90,6 +91,22 @@ impl SpiceParser {
             }
 
             let first_lower = tokens[0].to_lowercase();
+
+            // ngspice `.control ... .endc` blocks hold interactive simulator
+            // commands (run, plot, wrdata, echo, ...), not circuit topology.
+            // Skip the whole block — otherwise lines like `run` or `echo`
+            // get mis-parsed as an R or E device.
+            if first_lower == ".control" {
+                in_control_block = true;
+                continue;
+            }
+            if first_lower == ".endc" {
+                in_control_block = false;
+                continue;
+            }
+            if in_control_block {
+                continue;
+            }
 
             // Directives
             if first_lower == ".subckt" {
@@ -498,5 +515,26 @@ mod tests {
         assert_eq!(result.devices.len(), 5);
         assert_eq!(result.devices[3].device_type, 'R');
         assert_eq!(result.devices[3].model_or_value, "10k");
+    }
+
+    #[test]
+    fn test_control_block_is_skipped() {
+        // ngspice `.control ... .endc` commands must not be parsed as devices:
+        // `run` looks like an R, `echo` like an E (vcvs). Regression for the
+        // phantom-device bug found on myadc's double_tail_comp.spice.
+        let spice = "* comparator\n\
+            M1 out in vdd vdd pch W=1u L=28n\n\
+            M2 out in 0 0 nch W=1u L=28n\n\
+            .tran 1p 5n\n\
+            .control\n\
+            run\n\
+            wrdata comp_tran v(out)\n\
+            echo \"done\"\n\
+            .endc\n\
+            .end\n";
+        let mut parser = SpiceParser::new();
+        let result = parser.parse(spice);
+        assert_eq!(result.devices.len(), 2);
+        assert!(result.devices.iter().all(|d| d.device_type == 'M'));
     }
 }
