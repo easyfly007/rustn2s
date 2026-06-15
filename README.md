@@ -30,7 +30,7 @@ This is a Rust reimplementation of the N2S pipeline from the [MySchematic](https
 
 ### Test suite
 
-25 SPICE example circuits in `tests/examples/` covering simple linear circuits, op-amp topologies, hierarchical netlists, industrial naming conventions (PDK-style MOS models, VBAT/VIO power names), edge cases (disconnected sub-graphs, asymmetric pairs, long chains). `tests/pipeline.rs` runs every example through the pipeline + eval and asserts safety. See [docs/examples.md](docs/examples.md) for circuit descriptions (1–11) and [docs/test_set_expansion_findings.md](docs/test_set_expansion_findings.md) for the rationale behind 12–25.
+30 SPICE example circuits in `tests/examples/` covering simple linear circuits, op-amp topologies, hierarchical netlists, industrial naming conventions (PDK-style MOS models, VBAT/VIO power names), edge cases (disconnected sub-graphs, asymmetric pairs, long chains), and five real-world circuits (26–30) lifted from the `myadc` SAR-ADC design — a dynamic comparator, bootstrap switch, capacitor DAC, a 92-component async SAR controller, and a SKY130-PDK comparator. `tests/pipeline.rs` runs every example through the pipeline + eval and asserts safety. See [docs/examples.md](docs/examples.md) for circuit descriptions (1–11 in detail, 12–30 in summary tables) and [docs/test_set_expansion_findings.md](docs/test_set_expansion_findings.md) for the rationale behind 12–25.
 
 ## Installation
 

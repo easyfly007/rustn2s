@@ -441,6 +441,22 @@ Baseline scores above use the legacy weighted `compute_score`; under the [two-ti
 
 ---
 
+## Real-World Circuits (26–30, from the `myadc` SAR-ADC design)
+
+Circuits 01–25 are hand-written. Circuits 26–30 were lifted on 2026-06-15 from the `myadc` repository — a real 8-bit SAR ADC implemented in both PTM 28nm and SKY130 — to validate `n2s` against netlists nobody wrote *for* `n2s`. Each `.sp` carries a metadata header (source path, circuit type, device count, MOSFET count). Importing them immediately surfaced a real parser bug: ngspice `.control ... .endc` blocks were not skipped, so commands like `run` and `echo` were mis-parsed as R and E devices (fixed; see the `test_control_block_is_skipped` regression test).
+
+| # | Circuit | Source (myadc) | Type | Devices | MOSFETs | What it adds |
+|---|---------|----------------|------|:-------:|:-------:|--------------|
+| 26 | Dynamic comparator (28nm) | `ptm28nm/comparator/double_tail_comp.spice` | Double-tail clocked comparator (pre-amp + cross-coupled latch) | 23 (15 M, 4 C, 4 V) | 15 (8 N, 7 P) | First real clocked/regenerative analog block; flat netlist |
+| 27 | Bootstrap switch (28nm) | `ptm28nm/bootstrap/bootstrap_sw.spice` | Bootstrapped S/H sampling switch — hierarchical | 5 top-level (1 subckt box, 1 C, 3 V); subckt holds 8 M + 2 C + 1 R | 8 (in subckt) | X-instance + local `.subckt` hierarchical rendering |
+| 28 | Capacitor DAC (28nm) | `ptm28nm/dac/cap_dac_4p4.spice` | Binary-weighted (4+4 split) capacitor DAC array | 12 (10 C, 2 V) | 0 | Passive cap array; triggered the `.control`-skip bug (`destroy`/`let`) |
+| 29 | Async SAR logic (28nm) | `ptm28nm/sar_logic/async_sar.spice` | Asynchronous 8-bit SAR controller (digital, hierarchical) | 92 (88 gate/latch X instances, 2 C, 2 V) | 0 top-level | **Scale stress** — largest case at 92 components; X instances whose `.subckt` defs live in an `.include`'d file; quality floors at 0.25 (router hairball at scale) |
+| 30 | Dynamic comparator (sky130) | `sky130/comparator/double_tail_comp.spice` | Same comparator as 26, ported to SKY130 130nm | 24 (16 transistors, 4 C, 4 V) | 16 as X instances (9 nfet, 7 pfet) | PDK device modeling — transistors are `sky130_fd_pr__*fet` subckt instances with no in-file def |
+
+All five pass Tier 1 safety. 26/27/28/30 score `quality ≥ 0.80`; 29 deliberately documents the router's behavior on a 92-component digital block (`cross=0.02`), the concrete scale ceiling STATUS.md asked to probe.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:
@@ -470,17 +486,17 @@ done
 
 | Device | Type | Examples |
 |--------|------|---------|
-| M | MOSFET | 04, 05, 07, 08, 09, 10, 13, 16, 17, 20, 23, 24, 25 |
+| M | MOSFET | 04, 05, 07, 08, 09, 10, 13, 16, 17, 20, 23, 24, 25, 26 |
 | Q | BJT | 06, 08, 19 |
-| R | Resistor | 01–08, 10, 11, 12, 13, 14, 15, 18, 19, 20, 22, 24 |
-| C | Capacitor | 02, 03, 04, 07, 08, 09, 10, 11, 12, 14, 16, 17, 21, 23, 24, 25 |
+| R | Resistor | 01–08, 10, 11, 12, 13, 14, 15, 18, 19, 20, 22, 24, 27 |
+| C | Capacitor | 02, 03, 04, 07, 08, 09, 10, 11, 12, 14, 16, 17, 21, 23, 24, 25, 26, 27, 28, 29, 30 |
 | L | Inductor | 11 |
 | D | Diode | 03 |
-| V | Voltage source | 01–25 |
+| V | Voltage source | 01–30 |
 | I | Current source | 05, 06, 07, 10, 17, 19, 20 |
 | E | VCVS | 08, 11 |
 | G | VCCS | 11 |
 | H | CCVS | 11 |
 | F | CCCS | 11 |
-| X | Subcircuit inst | 09, 10, 25 |
-| .subckt | Subcircuit def | 09, 10, 25 |
+| X | Subcircuit inst | 09, 10, 25, 27, 29, 30 |
+| .subckt | Subcircuit def | 09, 10, 25, 27 |
