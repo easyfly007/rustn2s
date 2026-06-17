@@ -189,9 +189,11 @@ impl SchematicPlacer {
             }
         }
 
-        // 6. Align matched device pairs (symmetry improvement)
+        // 6. Align matched device pairs (symmetry improvement) and pull
+        //    isolated sources beside the devices they drive.
         if !devices.is_empty() {
             Self::align_matched_pairs(&mut placements, blocks, devices, opts);
+            Self::align_isolated_sources(&mut placements, blocks, devices, &graph, opts);
             // Recompute bounding rect after alignment
             min_x = f64::MAX;
             min_y = f64::MAX;
@@ -345,6 +347,175 @@ impl SchematicPlacer {
 
             // Shift all devices in the moving block by dy
             for &di in &blocks[move_block].device_indices {
+                if let Some(&pi) = dev_to_placement.get(&di) {
+                    placements[pi].position.y += dy;
+                    placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Isolated-source y-alignment
+    // ========================================================================
+
+    /// Post-processing pass: pull each independent V/I source onto the same
+    /// row as the device it drives, instead of leaving it stranded in a
+    /// column of its own.
+    ///
+    /// An "isolated source" is a source-only block with no DAG edges — its
+    /// only connections are power nets, which `build_dag` deliberately
+    /// excludes, so it never attracts to anything during layering and ends
+    /// up floating (the VVDD/VINP/VINN/VCLK scatter seen on the comparator
+    /// cases). We align its y-coordinate to the device sitting on its one
+    /// signal net so it lands beside its load.
+    ///
+    /// Guards that keep this safe:
+    /// - Pure supplies (only power nets, e.g. VVDD) have no signal net and
+    ///   are left alone — this also avoids collapsing genuinely disconnected
+    ///   sources together (cf. Bug 2, circuit 14).
+    /// - We only move when the source and target are in different columns
+    ///   (aligning within one column would stack them at the same point).
+    /// - A collision check skips the move if the destination is already
+    ///   occupied by another block.
+    fn align_isolated_sources(
+        placements: &mut [DevicePlacement],
+        blocks: &[FunctionalBlock],
+        devices: &[SpiceDevice],
+        graph: &BlockGraph,
+        opts: &PlacerOptions,
+    ) {
+        let mut has_edges = vec![false; graph.node_count];
+        for &(from, to) in &graph.edges {
+            has_edges[from] = true;
+            has_edges[to] = true;
+        }
+
+        let mut dev_to_placement: HashMap<usize, usize> = HashMap::new();
+        for (pi, p) in placements.iter().enumerate() {
+            dev_to_placement.insert(p.device_index, pi);
+        }
+        let mut dev_to_block: HashMap<usize, usize> = HashMap::new();
+        for (bi, block) in blocks.iter().enumerate() {
+            for &di in &block.device_indices {
+                dev_to_block.insert(di, bi);
+            }
+        }
+        // net (lowercased) → device indices touching it
+        let mut net_devices: HashMap<String, Vec<usize>> = HashMap::new();
+        for (di, dev) in devices.iter().enumerate() {
+            for node in &dev.nodes {
+                net_devices.entry(node.to_lowercase()).or_default().push(di);
+            }
+        }
+
+        for (bi, block) in blocks.iter().enumerate() {
+            if bi >= has_edges.len() || has_edges[bi] || block.device_indices.is_empty() {
+                continue;
+            }
+            // Only source-only blocks.
+            let all_sources = block
+                .device_indices
+                .iter()
+                .all(|&di| di < devices.len() && matches!(devices[di].device_type, 'V' | 'I'));
+            if !all_sources {
+                continue;
+            }
+            // Signal nets = this block's nets minus the hard-coded power
+            // rails. We must NOT use the analyzer's `power_nets` here: that
+            // set is augmented with every voltage-source terminal, so an
+            // input source's own signal net (e.g. `inp`) would be classed as
+            // power and filtered out. Only true rails disqualify a net.
+            let is_rail = |net: &str| {
+                matches!(
+                    net,
+                    "0" | "gnd"
+                        | "gnd!"
+                        | "vss"
+                        | "vss!"
+                        | "vdd"
+                        | "vdd!"
+                        | "vcc"
+                        | "vcc!"
+                        | "avdd"
+                        | "avss"
+                )
+            };
+            let signal_nets: Vec<String> = block
+                .all_nets
+                .iter()
+                .map(|s| s.to_lowercase())
+                .filter(|s| !is_rail(s))
+                .collect();
+            if signal_nets.is_empty() {
+                continue;
+            }
+            // Target = device on a signal net, in another block; prefer the
+            // most-anchored (largest) block, tie-break by lowest index.
+            let mut target_di: Option<usize> = None;
+            let mut best_size = 0usize;
+            for net in &signal_nets {
+                let Some(devs) = net_devices.get(net) else {
+                    continue;
+                };
+                for &di in devs {
+                    let Some(&tb) = dev_to_block.get(&di) else {
+                        continue;
+                    };
+                    if tb == bi {
+                        continue;
+                    }
+                    let size = blocks[tb].device_indices.len();
+                    let better = match target_di {
+                        None => true,
+                        Some(cur) => size > best_size || (size == best_size && di < cur),
+                    };
+                    if better {
+                        target_di = Some(di);
+                        best_size = size;
+                    }
+                }
+            }
+            let Some(target_di) = target_di else {
+                continue;
+            };
+
+            let src_di = block.device_indices[0];
+            let (Some(&src_pi), Some(&tgt_pi)) = (
+                dev_to_placement.get(&src_di),
+                dev_to_placement.get(&target_di),
+            ) else {
+                continue;
+            };
+
+            // Different columns only, and a meaningful y move.
+            let dx = (placements[src_pi].position.x - placements[tgt_pi].position.x).abs();
+            let dy = placements[tgt_pi].position.y - placements[src_pi].position.y;
+            if dx < opts.intra_block_spacing {
+                continue;
+            }
+            if dy.abs() < opts.grid_size {
+                continue;
+            }
+
+            // Collision check: don't move onto an already-occupied spot.
+            let block_pis: HashSet<usize> = block
+                .device_indices
+                .iter()
+                .filter_map(|di| dev_to_placement.get(di).copied())
+                .collect();
+            let new_x = placements[src_pi].position.x;
+            let new_y = placements[tgt_pi].position.y;
+            let collides = placements.iter().enumerate().any(|(pi, p)| {
+                !block_pis.contains(&pi)
+                    && (p.position.x - new_x).abs() < 50.0
+                    && (p.position.y - new_y).abs() < 50.0
+            });
+            if collides {
+                continue;
+            }
+
+            for &di in &block.device_indices {
                 if let Some(&pi) = dev_to_placement.get(&di) {
                     placements[pi].position.y += dy;
                     placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
