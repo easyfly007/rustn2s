@@ -419,10 +419,17 @@ pub mod builtin_symbols {
         let left_count = n.div_ceil(2);
         let right_count = n - left_count;
 
+        // PDK device names are long and hierarchical (e.g.
+        // `sky130_fd_pr__nfet_01v8`). Show only the final `__`-segment so the
+        // label fits — `nfet_01v8` rather than the whole library path.
+        let display_name = subckt_name.rsplit("__").next().unwrap_or(subckt_name);
+
         let pin_spacing = 20.0;
         let box_height = (left_count.max(right_count).max(1) as f64) * pin_spacing + 10.0;
         let half_h = box_height / 2.0;
-        let box_width = 60.0;
+        // Width adapts to the label (~6.5px per char at font-size 10) so the
+        // name never spills out of the box onto neighbouring symbols.
+        let box_width = 60.0_f64.max(display_name.len() as f64 * 6.5 + 16.0);
         let half_w = box_width / 2.0;
 
         let mut pins = Vec::new();
@@ -480,7 +487,7 @@ pub mod builtin_symbols {
         graphics.push(SymbolGraphic::Text {
             x: 0.0,
             y: 0.0,
-            text: subckt_name.to_string(),
+            text: display_name.to_string(),
             font_size: 10.0,
         });
 

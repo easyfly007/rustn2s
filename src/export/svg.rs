@@ -58,7 +58,10 @@ impl Default for SvgOptions {
             grid_spacing: 40.0,
             show_pin_names: true,
             show_instance_names: true,
-            show_symbol_names: true,
+            // The symbol shape already conveys the device type, so the
+            // "CAPACITOR"/"NMOS4"/"VSOURCE" caption is redundant noise that
+            // overlaps the instance name. Off by default; opt in if wanted.
+            show_symbol_names: false,
             show_legend: true,
             margin: 80.0,
             theme: SvgTheme::default(),
@@ -106,8 +109,8 @@ pub fn render_to_svg_with_symbols(
   .comp-fill {{ stroke:{cs}; stroke-width:1.5; fill:{cf}; }}\n\
   .pin {{ fill:{pc}; }}\n\
   .pin-name {{ fill:{pc}; font-family:monospace; font-size:8px; dominant-baseline:central; }}\n\
-  .name {{ fill:{tc}; font-family:monospace; font-size:11px; text-anchor:middle; dominant-baseline:central; }}\n\
-  .sub {{ fill:{sc}; font-family:monospace; font-size:9px; text-anchor:middle; dominant-baseline:central; }}\n\
+  .name {{ fill:{tc}; font-family:monospace; font-size:11px; dominant-baseline:central; }}\n\
+  .sub {{ fill:{sc}; font-family:monospace; font-size:9px; dominant-baseline:central; }}\n\
   .lbl {{ fill:{lc}; font-family:monospace; font-size:10px; text-anchor:middle; dominant-baseline:central; }}\n\
   .junc {{ fill:{jc}; }}\n\
 </style></defs>\n",
@@ -321,11 +324,23 @@ fn render_components(
                 cx - rw, cy - rh, rw * 2.0, rh * 2.0).unwrap();
         }
 
+        // Captions are placed clear of the symbol body using its bounding
+        // rect. Pins (and their net labels) sit at the edge mid-points, so
+        // the corners are the freest spots: the instance name goes just off
+        // the top-right corner, the symbol-type name just off the bottom-left.
+        // The old behaviour drew both centred on the body, colliding with
+        // each other, the pin names, and the net labels.
+        let bbox = symbols.get(&comp.symbol_name).map(|s| s.bounding_rect());
+        let top = bbox.as_ref().map(|b| b.y).unwrap_or(-15.0);
+        let bottom = bbox.as_ref().map(|b| b.y + b.height).unwrap_or(15.0);
+        let right = bbox.as_ref().map(|b| b.x + b.width).unwrap_or(15.0);
+        let left = bbox.as_ref().map(|b| b.x).unwrap_or(-15.0);
         if opts.show_instance_names && !comp.instance_name.is_empty() {
             writeln!(
                 svg,
-                "  <text x=\"{cx}\" y=\"{}\" class=\"name\">{}</text>",
-                cy - 3.0 * sc,
+                "  <text x=\"{}\" y=\"{}\" class=\"name\" text-anchor=\"start\">{}</text>",
+                cx + right * sc + 4.0,
+                cy + top * sc - 2.0,
                 comp.instance_name
             )
             .unwrap();
@@ -333,8 +348,9 @@ fn render_components(
         if opts.show_symbol_names {
             writeln!(
                 svg,
-                "  <text x=\"{cx}\" y=\"{}\" class=\"sub\">{}</text>",
-                cy + 10.0 * sc,
+                "  <text x=\"{}\" y=\"{}\" class=\"sub\" text-anchor=\"end\">{}</text>",
+                cx + left * sc - 4.0,
+                cy + bottom * sc + 2.0,
                 comp.symbol_name.to_uppercase()
             )
             .unwrap();
