@@ -302,3 +302,57 @@ this year.
   realistically.
 
 These remain open and worth follow-up later.
+
+---
+
+# Batch 2 expansion (31–36, 2026-07-03)
+
+Six more real circuits from `myadc` (see `docs/examples.md` for the
+table). Everything below is from running the pipeline and *looking at
+the SVGs*, per STATUS.md's "the eye tells you what an engineer would
+object to".
+
+## Found and fixed
+
+1. **`power_convention` metric false positive (Tier 1)** — case 31
+   (TG DFF) places two CMOS inverters stacked vertically in one
+   column, each internally P-above-N. The metric compared every PMOS
+   against every NMOS in the column, so the lower stage's PMOS
+   (y=220) vs the upper stage's NMOS (y=80) was flagged and Tier 1
+   failed on a perfectly good layout. Fixed: each PMOS is now checked
+   only against its *nearest* NMOS in the column (stage-local
+   pairing). An upside-down stage is still caught (unit-tested). All
+   36 examples pass Tier 1 after the fix; no other case's score
+   changed.
+
+## Open visual defects (not yet fixed)
+
+2. **Net-label boxes drawn on top of subckt-box symbols** (33, 34,
+   35; also mildly on MOSFET captions in 31/32). When a device
+   renders as a subckt box, pin net-labels are placed at the pin
+   position, which is on/inside the box outline — label and box
+   obscure each other, and the box's type name is unreadable. This is
+   the P1 text-overlap family, but for `label_offset` on box symbols
+   rather than captions. Score does not see it (34 scored
+   quality=0.77 while being visually illegible).
+
+3. **Isolated blocks still float** (34: `VVDD` far left, `XPT`
+   detached; 35: `XNC` alone bottom-right). The P3 partial fix
+   (y-align only) does not help when the source/blocks would need an
+   x+y relocation. Same limitation documented in commit `0b14d54`.
+
+4. **Scale (case 36, 684 devices)**: pipeline is fast (~0.15 s) and
+   Tier 1 passes, but the layout is a hairball — `cross=0.00`,
+   `wire=0.04`, shape=0.15. HAC + Sugiyama produce a very wide,
+   sparse canvas. This is the documented scale ceiling, now with a
+   7×-larger probe than case 29.
+
+## Still uncovered after batch 2
+
+- **C1** (power net not sourced by a V/I device) — no myadc netlist
+  exercises this; needs an LDO-style case.
+- **C2** (M card with non-matching model name AND non-power bulk) —
+  the real bulk-on-signal circuits in myadc (bootstrap variants) are
+  either `nch`/`pch` M cards (keyword check hits first) or sky130 X
+  instances (no M-card inference at all). A realistic C2 specimen
+  still doesn't exist in this corpus.

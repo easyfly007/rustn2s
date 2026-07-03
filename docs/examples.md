@@ -457,6 +457,23 @@ All five pass Tier 1 safety. 26/27/28/30 score `quality ≥ 0.80`; 29 deliberate
 
 ---
 
+## Real-World Circuits, Batch 2 (31–36, from `myadc`)
+
+Added 2026-07-03. Same sourcing rules as 26–30 (real netlists, metadata headers, no `*_pex_*` files). Selection targeted the blind spots STATUS.md left open: bulk-node type inference (C2-adjacent), cyclic connectivity, repetitive arrays, PMOS-input polarity, and true scale.
+
+| # | Circuit | Source (myadc) | Type | Devices | MOSFETs | What it adds |
+|---|---------|----------------|------|:-------:|:-------:|--------------|
+| 31 | TG master-slave DFF (28nm) | `ptm28nm/layout/tech/schematics/dff.spice` | Transmission-gate DFF, LVS reference, subckt-only | 16 M | 16 (8 N, 8 P) | Bare `nfet`/`pfet` model names force bulk-node type inference; master/slave feedback loops make the graph cyclic. **Found a metric false positive**: stacked CMOS stages in one column tripped `power_convention`'s global pairwise check (fixed — nearest-NMOS pairing) |
+| 32 | Comparator clock gen (28nm) | `ptm28nm/layout/tech/schematics/comp_clk_gen.spice` | 8-input NOR/NAND tree + INV, flattened | 30 M | 30 (16 N, 14 P) | Series-stack gate shapes stress HAC clustering and the inverter matcher |
+| 33 | Sampling switch array (sky130) | `sky130/layout/sampling_sw/sampling_sw_schematic.spice` | 9 CMOS transmission gates (1 reset + 8 sampling) | 18 X | 18 (9 nfet, 9 pfet) | Highly repetitive TG array; pair-aware Unknown template + label dedup on shared `vin`/`phi` nets |
+| 34 | PMOS-input comparator (sky130) | `sky130/comparator/pmos_double_tail_comp.spice` | PMOS-input double-tail comparator (mirror of 26/30) | 24 (16 X, 4 C, 4 V) | 16 (7 nfet, 9 pfet) | Signal flows PMOS→NMOS, opposite of the textbook layout; `.control` block with `foreach` |
+| 35 | Bootstrap switch LVS (sky130) | `sky130/layout/bootstrap/bootstrap_schematic.spice` | Abo-Gray bootstrapped switch, flat | 13 X (12 fet + 1 MIM cap) | 12 (7 nfet, 5 pfet) | Body pins wired to *signal* nets (triple-well body=out, iso-nwell body=nt); X-instance MIM cap. NOTE: X instances, so M-card C2 inference is *not* exercised |
+| 36 | SAR logic, flat extracted (sky130) | `sky130/layout/sar_logic/sar_logic_flat.spice` | Full 8-bit SAR logic flattened by magic extraction | 684 X | 684 | **Scale stress**, 7× previous max; extraction-style node names with `#` and `.`; runs in ~0.15 s but quality collapses (`cross=0.00`, `wire=0.04`) |
+
+All six pass Tier 1 safety (after the `power_convention` fix motivated by 31). Visual-inspection findings are recorded in `docs/test_set_expansion_findings.md`.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:
