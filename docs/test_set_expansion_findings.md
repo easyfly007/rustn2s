@@ -349,9 +349,25 @@ object to".
    evaluator gap is now the open item (see below).
 
 3. **Isolated blocks still float** (34: `VVDD` far left, `XPT`
-   detached; 35: `XNC` alone bottom-right). The P3 partial fix
-   (y-align only) does not help when the source/blocks would need an
-   x+y relocation. Same limitation documented in commit `0b14d54`.
+   detached; 35: `XNC` alone bottom-right). **MOSTLY FIXED
+   (2026-07-04).** The alignment pass now covers the P3 remainder:
+   it tries the original in-place y-align first, and when that can't
+   work (same column / destination occupied) it relocates the block
+   to a free spot directly beside its load (left/right/above/below
+   candidates, rect-based collision sim, must reduce distance).
+   Scope grew from source-only blocks to any single stranded device.
+   Symmetry guard learned the hard way: a device whose match key
+   appears exactly twice is a scored pair already y-aligned by
+   align_matched_pairs — free-form relocation of one member broke
+   cases 06/19/20/29; such devices only get a sideways pull at their
+   current y. Results: 26/30's input/clock sources sit beside their
+   loads (the original P3 known limitation), 34's VINP/VINN/VCLK
+   likewise, 35's XNC left its far corner for the clock-inverter
+   column. Still floating, deliberately: 34's `VVDD` (pure supply,
+   no signal-net anchor — the Bug 2 guard) and 34's `XPT` (its block
+   HAS DAG edges, so it is not "isolated"; it sits in layer 0 because
+   direction inference for X-primitive boxes is weak — a different
+   bug family, likely the next placer item).
 
 4. **Scale (case 36, 684 devices)**: pipeline is fast (~0.15 s) and
    Tier 1 passes, but the layout is a hairball — `cross=0.00`,

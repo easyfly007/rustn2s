@@ -266,44 +266,9 @@ impl SchematicPlacer {
             }
         }
 
-        // Per-device symbol bounding rects, the SAME geometry the overlap
-        // metric checks (builtin defs; synthesized numbered-pin boxes for X
-        // instances). The collision guard below must use the metric's exact
-        // footprints — a coarser estimate either lets real overlaps through
-        // or vetoes moves the metric would accept (which is how the first
-        // version of this guard broke case 06's R1/R2 symmetry alignment).
-        let builtin = builtin_symbols::all();
-        let mut box_cache: HashMap<String, crate::model::Rect> = HashMap::new();
-        let device_rects: Vec<crate::model::Rect> = devices
-            .iter()
-            .map(|dev| {
-                if dev.device_type == 'X' {
-                    *box_cache
-                        .entry(dev.model_or_value.clone())
-                        .or_insert_with(|| {
-                            let ports: Vec<String> =
-                                (1..=dev.nodes.len()).map(|i| i.to_string()).collect();
-                            builtin_symbols::create_subcircuit_symbol(&dev.model_or_value, &ports)
-                                .bounding_rect()
-                        })
-                } else {
-                    builtin
-                        .get(&Self::symbol_for_device(dev))
-                        .map(|s| s.bounding_rect())
-                        .unwrap_or(crate::model::Rect::new(-30.0, -20.0, 60.0, 40.0))
-                }
-            })
-            .collect();
-        // Two placed footprints collide when their world rects overlap by
-        // more than the metric's 1px touching margin.
+        let device_rects = Self::device_bounding_rects(devices);
         let rects_collide = |di_a: usize, pa: Point, di_b: usize, pb: Point| -> bool {
-            let (ra, rb) = (device_rects[di_a], device_rects[di_b]);
-            let (al, ar) = (pa.x + ra.left(), pa.x + ra.right());
-            let (at, ab) = (pa.y + ra.top(), pa.y + ra.bottom());
-            let (bl, br) = (pb.x + rb.left(), pb.x + rb.right());
-            let (bt, bb) = (pb.y + rb.top(), pb.y + rb.bottom());
-            let margin = 1.0;
-            al + margin < br && bl + margin < ar && at + margin < bb && bt + margin < ab
+            Self::rects_collide(&device_rects, di_a, pa, di_b, pb)
         };
 
         // Group devices by matching key: (symbol_name, sorted W/L/model).
@@ -441,9 +406,13 @@ impl SchematicPlacer {
     // Isolated-source y-alignment
     // ========================================================================
 
-    /// Post-processing pass: pull each independent V/I source onto the same
-    /// row as the device it drives, instead of leaving it stranded in a
-    /// column of its own.
+    /// Post-processing pass: pull each isolated block — an independent V/I
+    /// source, or any single stranded device — next to the device it
+    /// connects to, instead of leaving it floating in a column of its own.
+    /// Tries an in-place y-align first (P3's original move); when that
+    /// can't work (same column, or destination occupied), relocates a
+    /// single-device block to a free spot directly beside its load (the
+    /// x+y move that the P3 partial fix deferred).
     ///
     /// An "isolated source" is a source-only block with no DAG edges — its
     /// only connections are power nets, which `build_dag` deliberately
@@ -473,6 +442,8 @@ impl SchematicPlacer {
             has_edges[to] = true;
         }
 
+        let device_rects = &Self::device_bounding_rects(devices)[..];
+
         let mut dev_to_placement: HashMap<usize, usize> = HashMap::new();
         for (pi, p) in placements.iter().enumerate() {
             dev_to_placement.insert(p.device_index, pi);
@@ -495,12 +466,15 @@ impl SchematicPlacer {
             if bi >= has_edges.len() || has_edges[bi] || block.device_indices.is_empty() {
                 continue;
             }
-            // Only source-only blocks.
+            // Source-only blocks (the original P3 scope) plus single-device
+            // blocks of any type: a lone transistor with no DAG edges (case
+            // 34's XPT tail header, case 35's XNC clock inverter) floats in
+            // a column of its own exactly like an input source does.
             let all_sources = block
                 .device_indices
                 .iter()
                 .all(|&di| di < devices.len() && matches!(devices[di].device_type, 'V' | 'I'));
-            if !all_sources {
+            if !all_sources && block.device_indices.len() != 1 {
                 continue;
             }
             // Signal nets = this block's nets minus the hard-coded power
@@ -570,37 +544,120 @@ impl SchematicPlacer {
                 continue;
             };
 
-            // Different columns only, and a meaningful y move.
             let dx = (placements[src_pi].position.x - placements[tgt_pi].position.x).abs();
             let dy = placements[tgt_pi].position.y - placements[src_pi].position.y;
-            if dx < opts.intra_block_spacing {
-                continue;
-            }
-            if dy.abs() < opts.grid_size {
-                continue;
-            }
 
-            // Collision check: don't move onto an already-occupied spot.
             let block_pis: HashSet<usize> = block
                 .device_indices
                 .iter()
                 .filter_map(|di| dev_to_placement.get(di).copied())
                 .collect();
-            let new_x = placements[src_pi].position.x;
-            let new_y = placements[tgt_pi].position.y;
-            let collides = placements.iter().enumerate().any(|(pi, p)| {
-                !block_pis.contains(&pi)
-                    && (p.position.x - new_x).abs() < 50.0
-                    && (p.position.y - new_y).abs() < 50.0
-            });
-            if collides {
-                continue;
+
+            // (A) In-place y-align: different columns, meaningful y move,
+            // and every member's destination is collision-free.
+            if dx >= opts.intra_block_spacing && dy.abs() >= opts.grid_size {
+                let collides = block.device_indices.iter().any(|&mdi| {
+                    let Some(&mpi) = dev_to_placement.get(&mdi) else {
+                        return false;
+                    };
+                    if mdi >= devices.len() {
+                        return false;
+                    }
+                    let moved =
+                        Point::new(placements[mpi].position.x, placements[mpi].position.y + dy);
+                    placements.iter().enumerate().any(|(pi, p)| {
+                        !block_pis.contains(&pi)
+                            && p.device_index < devices.len()
+                            && Self::rects_collide(
+                                device_rects,
+                                mdi,
+                                moved,
+                                p.device_index,
+                                p.position,
+                            )
+                    })
+                });
+                if !collides {
+                    for &di in &block.device_indices {
+                        if let Some(&pi) = dev_to_placement.get(&di) {
+                            placements[pi].position.y += dy;
+                            placements[pi].position =
+                                placements[pi].position.snap_to_grid(opts.grid_size);
+                        }
+                    }
+                    continue;
+                }
             }
 
-            for &di in &block.device_indices {
-                if let Some(&pi) = dev_to_placement.get(&di) {
-                    placements[pi].position.y += dy;
-                    placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
+            // (B) x+y relocation: the P3 remainder. When a pure y-shift
+            // cannot help (source shares the target's column, or the
+            // destination row is occupied), move a single-device block to a
+            // free spot directly beside its load.
+            //
+            // Symmetry guard: devices whose match key appears exactly twice
+            // are scored as a pair by the symmetry metric, and
+            // align_matched_pairs has already put them on one row — moving
+            // one member vertically would break that (the first version of
+            // this pass regressed cases 06/19/20/29 exactly this way). Such
+            // devices only get a sideways pull at their CURRENT y. Sources
+            // and unpaired devices may take any free spot around the target.
+            if block.device_indices.len() != 1 || src_di >= devices.len() {
+                continue;
+            }
+            let src_dev = &devices[src_di];
+            let is_source = matches!(src_dev.device_type, 'V' | 'I');
+            let paired = !is_source && {
+                let key = Self::device_match_key(src_dev);
+                devices
+                    .iter()
+                    .filter(|d| {
+                        !matches!(d.device_type, 'V' | 'I') && Self::device_match_key(d) == key
+                    })
+                    .count()
+                    == 2
+            };
+
+            let (sr, tr) = (device_rects[src_di], device_rects[target_di]);
+            let clearance = 20.0;
+            let cur = placements[src_pi].position;
+            let tgt_pos = placements[tgt_pi].position;
+            let x_off = (sr.width + tr.width) / 2.0 + clearance;
+            let y_off = (sr.height + tr.height) / 2.0 + clearance;
+            let candidates: Vec<Point> = if paired {
+                vec![
+                    Point::new(tgt_pos.x - x_off, cur.y),
+                    Point::new(tgt_pos.x + x_off, cur.y),
+                ]
+            } else {
+                vec![
+                    Point::new(tgt_pos.x - x_off, tgt_pos.y),
+                    Point::new(tgt_pos.x + x_off, tgt_pos.y),
+                    Point::new(tgt_pos.x, tgt_pos.y - y_off),
+                    Point::new(tgt_pos.x, tgt_pos.y + y_off),
+                ]
+            };
+            let dist_now = (cur.x - tgt_pos.x).abs() + (cur.y - tgt_pos.y).abs();
+            for cand in candidates {
+                let cand = cand.snap_to_grid(opts.grid_size);
+                // Only move if it brings the device meaningfully closer.
+                let dist_cand = (cand.x - tgt_pos.x).abs() + (cand.y - tgt_pos.y).abs();
+                if dist_cand + opts.grid_size >= dist_now {
+                    continue;
+                }
+                let collides = placements.iter().enumerate().any(|(pi, p)| {
+                    pi != src_pi
+                        && p.device_index < devices.len()
+                        && Self::rects_collide(
+                            device_rects,
+                            src_di,
+                            cand,
+                            p.device_index,
+                            p.position,
+                        )
+                });
+                if !collides {
+                    placements[src_pi].position = cand;
+                    break;
                 }
             }
         }
@@ -1087,6 +1144,56 @@ impl SchematicPlacer {
         } else {
             40.0
         }
+    }
+
+    /// Per-device symbol bounding rects, the SAME geometry the overlap
+    /// metric checks (builtin defs; synthesized numbered-pin boxes for X
+    /// instances). Collision guards in the alignment passes must use the
+    /// metric's exact footprints — a coarser estimate either lets real
+    /// overlaps through or vetoes moves the metric would accept (which is
+    /// how the first version of the matched-pair guard broke case 06's
+    /// R1/R2 symmetry alignment).
+    fn device_bounding_rects(devices: &[SpiceDevice]) -> Vec<crate::model::Rect> {
+        let builtin = builtin_symbols::all();
+        let mut box_cache: HashMap<String, crate::model::Rect> = HashMap::new();
+        devices
+            .iter()
+            .map(|dev| {
+                if dev.device_type == 'X' {
+                    *box_cache
+                        .entry(dev.model_or_value.clone())
+                        .or_insert_with(|| {
+                            let ports: Vec<String> =
+                                (1..=dev.nodes.len()).map(|i| i.to_string()).collect();
+                            builtin_symbols::create_subcircuit_symbol(&dev.model_or_value, &ports)
+                                .bounding_rect()
+                        })
+                } else {
+                    builtin
+                        .get(&Self::symbol_for_device(dev))
+                        .map(|s| s.bounding_rect())
+                        .unwrap_or(crate::model::Rect::new(-30.0, -20.0, 60.0, 40.0))
+                }
+            })
+            .collect()
+    }
+
+    /// Two placed footprints collide when their world rects overlap by
+    /// more than the overlap metric's 1px touching margin.
+    fn rects_collide(
+        device_rects: &[crate::model::Rect],
+        di_a: usize,
+        pa: Point,
+        di_b: usize,
+        pb: Point,
+    ) -> bool {
+        let (ra, rb) = (device_rects[di_a], device_rects[di_b]);
+        let (al, ar) = (pa.x + ra.left(), pa.x + ra.right());
+        let (at, ab) = (pa.y + ra.top(), pa.y + ra.bottom());
+        let (bl, br) = (pb.x + rb.left(), pb.x + rb.right());
+        let (bt, bb) = (pb.y + rb.top(), pb.y + rb.bottom());
+        let margin = 1.0;
+        al + margin < br && bl + margin < ar && at + margin < bb && bt + margin < ab
     }
 
     fn layout_block(
