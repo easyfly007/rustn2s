@@ -31,49 +31,41 @@ pub fn check(schematic: &Schematic) -> PowerConventionReport {
         }
     }
 
+    // Each PMOS is compared only against the NEAREST NMOS in its column
+    // (nearest by |Δy|). Comparing against every NMOS in the column would
+    // flag legitimate multi-row layouts: two CMOS stages stacked vertically
+    // always put the lower stage's PMOS below the upper stage's NMOS, yet
+    // each stage is internally P-above-N (see test case 31, the TG DFF).
     let mut violations = Vec::new();
     let x_threshold = 100.0; // Only compare devices in similar columns
+    let mut compared = 0usize;
+    let mut valid_pairs = 0usize;
 
     for (pname, px, py) in &pmos {
-        for (nname, nx, ny) in &nmos {
-            if (px - nx).abs() <= x_threshold {
-                // PMOS should have smaller y (higher on page) than NMOS
-                if py > ny {
-                    violations.push(ConventionViolation {
-                        pmos_device: pname.clone(),
-                        pmos_y: *py,
-                        nmos_device: nname.clone(),
-                        nmos_y: *ny,
-                    });
-                }
+        let nearest = nmos
+            .iter()
+            .filter(|(_, nx, _)| (px - nx).abs() <= x_threshold)
+            .min_by(|(_, _, ay), (_, _, by)| (py - ay).abs().total_cmp(&(py - by).abs()));
+        if let Some((nname, _, ny)) = nearest {
+            compared += 1;
+            // PMOS should have smaller y (higher on page) than its stage's NMOS
+            if py > ny {
+                violations.push(ConventionViolation {
+                    pmos_device: pname.clone(),
+                    pmos_y: *py,
+                    nmos_device: nname.clone(),
+                    nmos_y: *ny,
+                });
+            } else {
+                valid_pairs += 1;
             }
         }
     }
 
-    let total_pairs = pmos.len() * nmos.len().max(1);
-    let score = if total_pairs == 0 {
-        1.0
+    let score = if compared > 0 {
+        round2(valid_pairs as f64 / compared as f64)
     } else {
-        let valid_pairs = pmos
-            .iter()
-            .flat_map(|(_, px, py)| {
-                nmos.iter()
-                    .filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
-                    .map(move |(_, _, ny)| if py <= ny { 1.0 } else { 0.0 })
-            })
-            .sum::<f64>();
-        let compared = pmos
-            .iter()
-            .flat_map(|(_, px, _)| {
-                nmos.iter()
-                    .filter(move |(_, nx, _)| (px - nx).abs() <= x_threshold)
-            })
-            .count();
-        if compared > 0 {
-            round2(valid_pairs / compared as f64)
-        } else {
-            1.0
-        }
+        1.0
     };
 
     PowerConventionReport {
@@ -150,22 +142,48 @@ mod tests {
 
     #[test]
     fn mixed_compliance_yields_partial_score() {
-        // M1 (pmos top) vs M3 (nmos bottom): valid.
-        // M1 (pmos top) vs M2 (nmos top, in same column): valid (py=0 ≤ ny=0).
-        // M4 (pmos bottom) vs M3 (nmos top): violation (py=100 > ny=0).
-        // → 2 valid + 1 violation across 3 compared pairs in column 0.
+        // M1 (pmos, y=0): nearest NMOS is M2 (y=0, Δ=0) → valid (0 ≤ 0).
+        // M4 (pmos, y=100): nearest NMOS is M3 (y=50, Δ=50) → violation.
         let mut s = Schematic::new("");
         s.components.push(comp("M1", "pmos4", 0.0, 0.0));
         s.components.push(comp("M4", "pmos4", 0.0, 100.0));
         s.components.push(comp("M2", "nmos4", 0.0, 0.0));
         s.components.push(comp("M3", "nmos4", 0.0, 50.0));
         let r = check(&s);
-        // M1 vs M2 (0 ≤ 0): valid
-        // M1 vs M3 (0 ≤ 50): valid
-        // M4 vs M2 (100 > 0): violation
-        // M4 vs M3 (100 > 50): violation
-        assert_eq!(r.violations.len(), 2);
-        // 2 valid out of 4 compared
+        assert_eq!(r.violations.len(), 1);
+        // 1 valid out of 2 compared
+        assert_eq!(r.score, 0.5);
+    }
+
+    #[test]
+    fn stacked_cmos_stages_in_one_column_are_valid() {
+        // Two CMOS stages stacked vertically, each internally P-above-N
+        // (the case-31 TG-DFF pattern). The lower stage's PMOS (y=220) sits
+        // below the upper stage's NMOS (y=80) but must NOT be flagged: each
+        // PMOS is checked only against its nearest NMOS.
+        let mut s = Schematic::new("");
+        s.components.push(comp("MP1", "pmos4", 0.0, 0.0));
+        s.components.push(comp("MN1", "nmos4", 0.0, 80.0));
+        s.components.push(comp("MP3", "pmos4", 0.0, 220.0));
+        s.components.push(comp("MN3", "nmos4", 0.0, 300.0));
+        let r = check(&s);
+        assert!(r.violations.is_empty());
+        assert_eq!(r.score, 1.0);
+    }
+
+    #[test]
+    fn inverted_stage_below_valid_stage_is_caught() {
+        // Upper stage correct (P above N); lower stage upside down
+        // (N at y=220 above its P at y=300). Nearest-pairing still
+        // catches the inverted stage.
+        let mut s = Schematic::new("");
+        s.components.push(comp("MP1", "pmos4", 0.0, 0.0));
+        s.components.push(comp("MN1", "nmos4", 0.0, 80.0));
+        s.components.push(comp("MN3", "nmos4", 0.0, 220.0));
+        s.components.push(comp("MP3", "pmos4", 0.0, 300.0));
+        let r = check(&s);
+        assert_eq!(r.violations.len(), 1);
+        assert_eq!(r.violations[0].pmos_device, "MP3");
         assert_eq!(r.score, 0.5);
     }
 }
