@@ -1,5 +1,6 @@
-use crate::model::{builtin_symbols, Rect, Schematic};
+use crate::model::{builtin_symbols, Rect, Schematic, SymbolDef};
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 pub struct OverlapReport {
@@ -7,12 +8,19 @@ pub struct OverlapReport {
     pub overlapping_pairs: Vec<(String, String)>,
 }
 
-pub fn check(schematic: &Schematic) -> OverlapReport {
+/// `subckt_symbols` sizes the `subckt_*` box components that builtin lookup
+/// can't. Without it, X-instance boxes had no bounding rect and were
+/// invisible to this check — overlapping boxes sailed through no_overlap
+/// (found on test case 34's cross-coupled pairs, caught by eye only).
+pub fn check(schematic: &Schematic, subckt_symbols: &HashMap<String, SymbolDef>) -> OverlapReport {
     let symbols = builtin_symbols::all();
     let mut rects: Vec<(String, Rect)> = Vec::new();
 
     for comp in &schematic.components {
-        if let Some(sym) = symbols.get(&comp.symbol_name) {
+        if let Some(sym) = symbols
+            .get(&comp.symbol_name)
+            .or_else(|| subckt_symbols.get(&comp.symbol_name))
+        {
             let base = sym.bounding_rect();
             // Transform bounding rect corners
             let corners = [
@@ -93,7 +101,7 @@ mod tests {
 
     #[test]
     fn no_components_yields_no_overlap() {
-        let r = check(&Schematic::new(""));
+        let r = check(&Schematic::new(""), &HashMap::new());
         assert_eq!(r.overlap_count, 0);
         assert!(r.overlapping_pairs.is_empty());
     }
@@ -103,7 +111,7 @@ mod tests {
         let mut s = Schematic::new("");
         s.components.push(comp("R1", "resistor", 0.0, 0.0));
         s.components.push(comp("R2", "resistor", 1000.0, 0.0));
-        let r = check(&s);
+        let r = check(&s, &HashMap::new());
         assert_eq!(r.overlap_count, 0);
     }
 
@@ -112,7 +120,7 @@ mod tests {
         let mut s = Schematic::new("");
         s.components.push(comp("R1", "resistor", 0.0, 0.0));
         s.components.push(comp("R2", "resistor", 0.0, 0.0));
-        let r = check(&s);
+        let r = check(&s, &HashMap::new());
         assert_eq!(r.overlap_count, 1);
         let (a, b) = &r.overlapping_pairs[0];
         assert!((a == "R1" && b == "R2") || (a == "R2" && b == "R1"));
@@ -124,7 +132,32 @@ mod tests {
         let mut s = Schematic::new("");
         s.components.push(comp("X1", "no_such_symbol", 0.0, 0.0));
         s.components.push(comp("X2", "no_such_symbol", 0.0, 0.0));
-        let r = check(&s);
+        let r = check(&s, &HashMap::new());
         assert_eq!(r.overlap_count, 0);
+    }
+
+    #[test]
+    fn overlapping_subckt_boxes_are_flagged() {
+        // Two X-instance boxes at the same position, sized via the provided
+        // subckt symbol table (the case-34 blind spot).
+        let ports: Vec<String> = (1..=4).map(|i| i.to_string()).collect();
+        let mut subckt = HashMap::new();
+        subckt.insert(
+            "subckt_nfet_01v8".to_string(),
+            builtin_symbols::create_subcircuit_symbol("nfet_01v8", &ports),
+        );
+        let mut s = Schematic::new("");
+        s.components.push(comp("X1", "subckt_nfet_01v8", 0.0, 0.0));
+        s.components.push(comp("X2", "subckt_nfet_01v8", 40.0, 0.0));
+        let r = check(&s, &subckt);
+        assert_eq!(r.overlap_count, 1);
+
+        // Same pair far enough apart → clean.
+        let mut s2 = Schematic::new("");
+        s2.components.push(comp("X1", "subckt_nfet_01v8", 0.0, 0.0));
+        s2.components
+            .push(comp("X2", "subckt_nfet_01v8", 300.0, 0.0));
+        let r2 = check(&s2, &subckt);
+        assert_eq!(r2.overlap_count, 0);
     }
 }

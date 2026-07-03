@@ -361,12 +361,30 @@ object to".
 
 ## New evaluator gap found while fixing defect 2
 
-- **`eval/overlap` is blind to subckt boxes.** It sizes components
-  from `builtin_symbols::all()` only and skips unknown symbol names,
-  so overlapping X-instance boxes never fail Tier 1 no_overlap (34's
-  pair overlap sailed through). Fixing it needs the eval to either
-  receive the schematic's synthesized symbol table or apply the same
-  `subckt_box_size` estimate to `subckt_*` names.
+- **`eval/overlap` is blind to subckt boxes.** ~~It sizes components
+  from `builtin_symbols::all()` only and skips unknown symbol names.~~
+  **FIXED (2026-07-04).** `evaluate()` now builds a subckt symbol
+  table from the netlist (local defs + synthesized boxes for X models
+  without one, superset over all pipeline modes) and hands it to the
+  overlap check. Turning the check on immediately flagged three real
+  overlaps the eye had missed or tolerated:
+  - case 29 `XSR7`/`XBR7` — vertical stack pitch didn't budget box
+    heights (7-port boxes are 90px tall at an 80px step). Fixed: the
+    Unknown template now advances rows by real footprint heights.
+  - case 34 `XNR1`/`XNR2` — `align_matched_pairs` collapsed a
+    same-column pair onto identical coordinates. Fixed: same-column
+    guard.
+  - case 30 `XP2`/`XN_TAIL` — the same pass shifted a block onto an
+    unrelated device with no collision check. Fixed: the shift is
+    simulated first against the *same* symbol bounding rects the
+    overlap metric uses (a coarser estimate initially broke case 06's
+    legitimate alignment — guard and metric must share geometry), and
+    if the preferred block can't move safely the pass tries the other
+    block (which is what rescues 30's tail pair).
+  Related `symmetry` refinement: a matched pair stacked in one column
+  (x_diff ≈ 0) now scores 1.0 — a vertical/cascode arrangement is a
+  clean layout, and for a same-column pair it is the only one that
+  doesn't overlap. Diagonal misalignment still scores low.
 
 ## Still uncovered after batch 2
 

@@ -266,6 +266,46 @@ impl SchematicPlacer {
             }
         }
 
+        // Per-device symbol bounding rects, the SAME geometry the overlap
+        // metric checks (builtin defs; synthesized numbered-pin boxes for X
+        // instances). The collision guard below must use the metric's exact
+        // footprints — a coarser estimate either lets real overlaps through
+        // or vetoes moves the metric would accept (which is how the first
+        // version of this guard broke case 06's R1/R2 symmetry alignment).
+        let builtin = builtin_symbols::all();
+        let mut box_cache: HashMap<String, crate::model::Rect> = HashMap::new();
+        let device_rects: Vec<crate::model::Rect> = devices
+            .iter()
+            .map(|dev| {
+                if dev.device_type == 'X' {
+                    *box_cache
+                        .entry(dev.model_or_value.clone())
+                        .or_insert_with(|| {
+                            let ports: Vec<String> =
+                                (1..=dev.nodes.len()).map(|i| i.to_string()).collect();
+                            builtin_symbols::create_subcircuit_symbol(&dev.model_or_value, &ports)
+                                .bounding_rect()
+                        })
+                } else {
+                    builtin
+                        .get(&Self::symbol_for_device(dev))
+                        .map(|s| s.bounding_rect())
+                        .unwrap_or(crate::model::Rect::new(-30.0, -20.0, 60.0, 40.0))
+                }
+            })
+            .collect();
+        // Two placed footprints collide when their world rects overlap by
+        // more than the metric's 1px touching margin.
+        let rects_collide = |di_a: usize, pa: Point, di_b: usize, pb: Point| -> bool {
+            let (ra, rb) = (device_rects[di_a], device_rects[di_b]);
+            let (al, ar) = (pa.x + ra.left(), pa.x + ra.right());
+            let (at, ab) = (pa.y + ra.top(), pa.y + ra.bottom());
+            let (bl, br) = (pb.x + rb.left(), pb.x + rb.right());
+            let (bt, bb) = (pb.y + rb.top(), pb.y + rb.bottom());
+            let margin = 1.0;
+            al + margin < br && bl + margin < ar && at + margin < bb && bt + margin < ab
+        };
+
         // Group devices by matching key: (symbol_name, sorted W/L/model).
         // Skip V/I sources: two independent voltage sources happen to have
         // identical match keys (no W/L parameters, model_or_value parsed
@@ -325,32 +365,74 @@ impl SchematicPlacer {
                 continue;
             }
 
-            // Determine which block to move (prefer moving the smaller block)
-            let size_a = blocks[block_a].device_indices.len();
-            let size_b = blocks[block_b].device_indices.len();
-
-            let (move_block, anchor_di, move_di) = if size_a <= size_b {
-                (block_a, di_b, di_a)
-            } else {
-                (block_b, di_a, di_b)
-            };
-
-            let anchor_pi = dev_to_placement[&anchor_di];
-            let move_pi = dev_to_placement[&move_di];
-
-            // Compute the delta to align the moving device with the anchor's y
-            let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
-
-            if dy.abs() < opts.grid_size {
+            // A symmetric pair sits side-by-side; if the two devices are in
+            // the same column, aligning y would stack them onto the same
+            // point (case 34: XNR1/XNR2 collapsed to identical coordinates).
+            let (pi_a2, pi_b2) = (dev_to_placement[&di_a], dev_to_placement[&di_b]);
+            let x_gap = (placements[pi_a2].position.x - placements[pi_b2].position.x).abs();
+            let min_x_gap = (device_rects[di_a].width + device_rects[di_b].width) / 2.0;
+            if x_gap < min_x_gap {
                 continue;
             }
 
-            // Shift all devices in the moving block by dy
-            for &di in &blocks[move_block].device_indices {
-                if let Some(&pi) = dev_to_placement.get(&di) {
-                    placements[pi].position.y += dy;
-                    placements[pi].position = placements[pi].position.snap_to_grid(opts.grid_size);
+            // Candidate moves: prefer shifting the smaller block, but fall
+            // back to the other one if the first would collide (case 30:
+            // XN_TAIL's column is blocked at the target row, while XN_TAIL2
+            // can safely drop to XN_TAIL's row instead).
+            let size_a = blocks[block_a].device_indices.len();
+            let size_b = blocks[block_b].device_indices.len();
+            let candidates = if size_a <= size_b {
+                [(block_a, di_b, di_a), (block_b, di_a, di_b)]
+            } else {
+                [(block_b, di_a, di_b), (block_a, di_b, di_a)]
+            };
+
+            for (move_block, anchor_di, move_di) in candidates {
+                let anchor_pi = dev_to_placement[&anchor_di];
+                let move_pi = dev_to_placement[&move_di];
+
+                // Delta to align the moving device with the anchor's y
+                let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
+                if dy.abs() < opts.grid_size {
+                    break;
                 }
+
+                // Collision check: simulate the shift and skip it if any
+                // moved device would land on a stationary one (case 30: a
+                // block shift dropped XP2 exactly onto XN_TAIL).
+                let move_pis: HashSet<usize> = blocks[move_block]
+                    .device_indices
+                    .iter()
+                    .filter_map(|di| dev_to_placement.get(di).copied())
+                    .collect();
+                let collides = blocks[move_block].device_indices.iter().any(|&mdi| {
+                    let Some(&mpi) = dev_to_placement.get(&mdi) else {
+                        return false;
+                    };
+                    if mdi >= devices.len() {
+                        return false;
+                    }
+                    let moved_pos =
+                        Point::new(placements[mpi].position.x, placements[mpi].position.y + dy);
+                    placements.iter().enumerate().any(|(pi, p)| {
+                        !move_pis.contains(&pi)
+                            && p.device_index < devices.len()
+                            && rects_collide(mdi, moved_pos, p.device_index, p.position)
+                    })
+                });
+                if collides {
+                    continue;
+                }
+
+                // Shift all devices in the moving block by dy
+                for &di in &blocks[move_block].device_indices {
+                    if let Some(&pi) = dev_to_placement.get(&di) {
+                        placements[pi].position.y += dy;
+                        placements[pi].position =
+                            placements[pi].position.snap_to_grid(opts.grid_size);
+                    }
+                }
+                break;
             }
         }
     }
@@ -996,6 +1078,17 @@ impl SchematicPlacer {
         }
     }
 
+    /// Vertical counterpart of `device_width`: builtin symbols are ~40px
+    /// tall, subckt boxes grow with port count (5 ports → 70, 7 → 90),
+    /// so stacked layouts must budget for it.
+    fn device_height(dev: &SpiceDevice) -> f64 {
+        if dev.device_type == 'X' {
+            builtin_symbols::subckt_box_size(&dev.model_or_value, dev.nodes.len()).1
+        } else {
+            40.0
+        }
+    }
+
     fn layout_block(
         block: &FunctionalBlock,
         all_devices: &[SpiceDevice],
@@ -1189,53 +1282,80 @@ impl SchematicPlacer {
                 };
                 order.sort_by_key(|k| polarity_of_key(k));
 
-                let mut placements = Vec::new();
-                let mut y = 0.0;
-                let mut max_width: f64 = 60.0;
+                // Collect rows first (a matched pair shares one row), then
+                // place them with a vertical pitch that budgets the tallest
+                // footprint in each row — subckt boxes with many ports are
+                // taller than the 40px a fixed `sp` step assumed (case 29:
+                // 7-port srlatch_r boxes are 90px tall at an 80px pitch).
+                let mut rows: Vec<Vec<usize>> = Vec::new();
                 let mut emitted: HashSet<usize> = HashSet::new();
-
                 for key in &order {
                     let group = &key_groups[key];
                     if group.len() == 2 {
+                        rows.push(group.clone());
+                        emitted.insert(group[0]);
+                        emitted.insert(group[1]);
+                    } else {
+                        // Singletons and 3+-groups: one row each, original order.
+                        for &di in group {
+                            rows.push(vec![di]);
+                            emitted.insert(di);
+                        }
+                    }
+                }
+                // Safety: any device not yet emitted (shouldn't happen) stacks at the end.
+                for &di in devices {
+                    if !emitted.contains(&di) {
+                        rows.push(vec![di]);
+                    }
+                }
+
+                let dev_h = |di: usize| -> f64 {
+                    if di < all_devices.len() {
+                        Self::device_height(&all_devices[di])
+                    } else {
+                        40.0
+                    }
+                };
+                let row_h = |row: &Vec<usize>| -> f64 {
+                    row.iter().map(|&di| dev_h(di)).fold(40.0, f64::max)
+                };
+
+                let mut placements = Vec::new();
+                let mut y = 0.0;
+                let mut max_width: f64 = 60.0;
+                let mut prev_h: Option<f64> = None;
+                for row in &rows {
+                    let h = row_h(row);
+                    if let Some(ph) = prev_h {
+                        y += sp.max((ph + h) / 2.0 + 10.0);
+                    }
+                    if row.len() == 2 {
                         // Matched pair → horizontal split
-                        let pitch = pair_pitch(group[0], group[1]);
+                        let pitch = pair_pitch(row[0], row[1]);
                         placements.push((
-                            group[0],
+                            row[0],
                             String::new(),
                             Point::new(-pitch / 2.0, y),
                             0,
                             false,
                         ));
                         placements.push((
-                            group[1],
+                            row[1],
                             String::new(),
                             Point::new(pitch / 2.0, y),
                             0,
                             false,
                         ));
-                        emitted.insert(group[0]);
-                        emitted.insert(group[1]);
-                        max_width = max_width.max(pitch + dev_w(group[0]).max(dev_w(group[1])));
-                        y += sp;
+                        max_width = max_width.max(pitch + dev_w(row[0]).max(dev_w(row[1])));
                     } else {
-                        // Singletons and 3+-groups: stack vertically in original order.
-                        for &di in group {
-                            placements.push((di, String::new(), Point::new(0.0, y), 0, false));
-                            emitted.insert(di);
-                            y += sp;
-                        }
+                        placements.push((row[0], String::new(), Point::new(0.0, y), 0, false));
+                        max_width = max_width.max(dev_w(row[0]));
                     }
+                    prev_h = Some(h);
                 }
 
-                // Safety: any device not yet emitted (shouldn't happen) stacks at the end.
-                for &di in devices {
-                    if !emitted.contains(&di) {
-                        placements.push((di, String::new(), Point::new(0.0, y), 0, false));
-                        y += sp;
-                    }
-                }
-
-                let h = (y - sp).max(0.0) + 40.0;
+                let h = y + prev_h.unwrap_or(40.0) / 2.0 + 20.0;
                 InternalLayout {
                     placements,
                     width: max_width,

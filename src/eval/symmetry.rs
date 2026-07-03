@@ -56,10 +56,19 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
             let y_diff = (a.position.y - b.position.y).abs();
             let x_diff = (a.position.x - b.position.x).abs();
 
-            // Symmetry: perfect if same y, reasonable x separation
-            // Score: 1.0 when y_diff == 0, decays with y_diff
+            // Two clean arrangements score 1.0:
+            //  - mirror pair: same row (y_diff ≈ 0), side by side;
+            //  - vertical stack: same column (x_diff ≈ 0), one above the
+            //    other — the deliberate series/cascode arrangement, and the
+            //    only safe one when a same-column pair cannot be y-aligned
+            //    without overlapping (cases 30/34, wide subckt boxes).
+            // Only a diagonal offset — misaligned in BOTH axes — is sloppy.
             let max_dim = x_diff.max(y_diff).max(1.0);
-            let score = 1.0 - (y_diff / max_dim).min(1.0);
+            let score = if x_diff <= 10.0 {
+                1.0
+            } else {
+                1.0 - (y_diff / max_dim).min(1.0)
+            };
 
             matched_pairs.push(MatchedPair {
                 device_a: a.instance_name.clone(),
@@ -162,6 +171,26 @@ mod tests {
         assert_eq!(r.matched_pairs.len(), 1);
         assert_eq!(r.matched_pairs[0].y_diff, 100.0);
         assert!(r.matched_pairs[0].symmetry_score <= 0.01);
+    }
+
+    #[test]
+    fn vertical_stack_is_a_clean_arrangement() {
+        // Same column (x_diff = 0), different rows: a deliberate series /
+        // cascode-style stack, not a failed mirror — scores 1.0.
+        let mut s = Schematic::new("");
+        s.components
+            .push(comp("M1", "nmos4", 0.0, 0.0, &[("W", "10u"), ("L", "1u")]));
+        s.components.push(comp(
+            "M2",
+            "nmos4",
+            0.0,
+            160.0,
+            &[("W", "10u"), ("L", "1u")],
+        ));
+        let r = check(&s);
+        assert_eq!(r.matched_pairs.len(), 1);
+        assert_eq!(r.matched_pairs[0].symmetry_score, 1.0);
+        assert_eq!(r.overall_score, 1.0);
     }
 
     #[test]
