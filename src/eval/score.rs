@@ -86,22 +86,28 @@ pub struct QualityProfile {
     pub crossings: f64,
     pub wire_length: f64,
     pub label_ratio: f64,
+    /// Fraction of text elements (net labels, instance captions) that do
+    /// NOT collide with other text or component bodies. Added 2026-07-04:
+    /// this is the readability signal every earlier score missed (case 27
+    /// scored 1.000 while its text layers were illegible).
+    pub text_clarity: f64,
 }
 
 impl QualityProfile {
-    /// All four sub-score values as a fixed-order array, useful for
+    /// All five sub-score values as a fixed-order array, useful for
     /// lexicographic comparisons. Order is canonical and stable so
     /// callers can sort or compare profiles without naming fields.
-    pub fn as_array(&self) -> [f64; 4] {
+    pub fn as_array(&self) -> [f64; 5] {
         [
             self.aspect_ratio,
             self.crossings,
             self.wire_length,
             self.label_ratio,
+            self.text_clarity,
         ]
     }
 
-    /// Lexicographic minimum across all four sub-scores. Returns the
+    /// Lexicographic minimum across all five sub-scores. Returns the
     /// worst sub-score paired with its name.
     pub fn worst(&self) -> (&'static str, f64) {
         let mut worst = ("aspect_ratio", self.aspect_ratio);
@@ -109,6 +115,7 @@ impl QualityProfile {
             ("crossings", self.crossings),
             ("wire_length", self.wire_length),
             ("label_ratio", self.label_ratio),
+            ("text_clarity", self.text_clarity),
         ] {
             if value < worst.1 {
                 worst = (name, value);
@@ -128,6 +135,7 @@ impl QualityProfile {
         for (name, value) in [
             ("wire_length", self.wire_length),
             ("label_ratio", self.label_ratio),
+            ("text_clarity", self.text_clarity),
         ] {
             if value < worst.1 {
                 worst = (name, value);
@@ -140,8 +148,11 @@ impl QualityProfile {
     /// continuous quality sub-scores (crossings, wire_length,
     /// label_ratio) are combined with weights renormalized so they
     /// sum to 1.0; aspect_ratio is reported separately as a shape
-    /// signal. Recommended over `compute_score(...).overall` for new
-    /// consumers — see docs/metric_reform.md step 7.
+    /// signal. `text_clarity` is deliberately NOT in this weighted sum
+    /// yet — it has no tuned weight and the overfitting audit warns
+    /// against inventing one; lex-min consumers (`worst_quality`) see
+    /// it instead. Recommended over `compute_score(...).overall` for
+    /// new consumers — see docs/metric_reform.md step 7.
     pub fn quality_score(&self, weights: &ScoreWeights) -> f64 {
         let total = weights.crossings + weights.wire_length + weights.label_ratio;
         if total <= 0.0 {
@@ -176,6 +187,7 @@ pub fn compute_profile(report: &EvalReport) -> (SafetyReport, QualityProfile) {
         crossings: breakdown.crossings_score,
         wire_length: breakdown.wire_length_score,
         label_ratio: breakdown.label_ratio_score,
+        text_clarity: report.text_overlap.score,
     };
 
     (safety, quality)
@@ -362,8 +374,8 @@ mod tests {
     use super::*;
     use crate::eval::{
         BoundingBoxReport, ConnectivityReport, LabelUsageReport, OverlapReport,
-        PowerConventionReport, SymmetryReport, WireBendReport, WireCrossingReport,
-        WireLengthReport,
+        PowerConventionReport, SymmetryReport, TextOverlapReport, WireBendReport,
+        WireCrossingReport, WireLengthReport,
     };
 
     /// Build a perfect-score EvalReport baseline; tweak fields per test.
@@ -423,6 +435,12 @@ mod tests {
                 pmos_count: 0,
                 nmos_count: 0,
                 violations: vec![],
+                score: 1.0,
+            },
+            text_overlap: TextOverlapReport {
+                total_texts: 0,
+                dirty_texts: 0,
+                collisions: vec![],
                 score: 1.0,
             },
         }
@@ -621,6 +639,7 @@ mod tests {
             crossings: 0.4,
             wire_length: 0.7,
             label_ratio: 0.6,
+            text_clarity: 0.8,
         };
         let (name, value) = q.worst();
         assert_eq!(name, "crossings");
@@ -635,6 +654,7 @@ mod tests {
             crossings: 0.45,
             wire_length: 0.80,
             label_ratio: 0.60,
+            text_clarity: 0.90,
         };
         // worst() includes ar → returns ("aspect_ratio", 0.20)
         assert_eq!(q.worst().0, "aspect_ratio");
@@ -651,6 +671,7 @@ mod tests {
             crossings: 1.0,
             wire_length: 1.0,
             label_ratio: 1.0,
+            text_clarity: 1.0,
         };
         let s = q.quality_score(&ScoreWeights::default());
         assert!(
@@ -667,6 +688,7 @@ mod tests {
             crossings: 0.5,
             wire_length: 0.5,
             label_ratio: 0.5,
+            text_clarity: 0.5,
         };
         // With default weights: crossings=0.15, wire_length=0.10,
         // label_ratio=0.10. Sum 0.35. Renormalized contributions all
@@ -682,9 +704,10 @@ mod tests {
             crossings: 0.2,
             wire_length: 0.3,
             label_ratio: 0.4,
+            text_clarity: 0.5,
         };
         let arr = q.as_array();
-        assert_eq!(arr, [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(arr, [0.1, 0.2, 0.3, 0.4, 0.5]);
     }
 
     #[test]

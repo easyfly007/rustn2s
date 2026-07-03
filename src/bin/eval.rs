@@ -72,11 +72,12 @@ fn main() {
             format!("FAIL[{}]", safety.failures().join(","))
         };
         println!(
-            "{circuit_name:<32} safety={safety_str} | shape={:.2} | cross={:.2} wire={:.2} lbl={:.2} → quality={:.3} | overall={:.3}",
+            "{circuit_name:<32} safety={safety_str} | shape={:.2} | cross={:.2} wire={:.2} lbl={:.2} txt={:.2} → quality={:.3} | overall={:.3}",
             quality.aspect_ratio,
             quality.crossings,
             quality.wire_length,
             quality.label_ratio,
+            quality.text_clarity,
             quality_score,
             breakdown.overall,
         );

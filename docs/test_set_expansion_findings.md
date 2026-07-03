@@ -402,6 +402,28 @@ object to".
   clean layout, and for a same-column pair it is the only one that
   doesn't overlap. Diagonal misalignment still scores low.
 
+## Text-clarity metric added (2026-07-04)
+
+The recurring lesson of both real-world batches — case 27 at
+quality=1.000 while illegible, case 34's labels-on-boxes invisible to
+every score — is now a metric. `eval/text_overlap` mirrors the SVG
+renderer's text geometry (50x16 net-label boxes, 11px-monospace
+instance captions anchored at the symbol's top-right corner) and
+counts collisions text-vs-text and text-vs-component-body (a caption
+may not collide with its own symbol). Score = clean/total texts.
+
+Wired in as `text_clarity`, the fifth Tier 2 quality sub-score: it
+participates in `worst()`/`worst_quality()` (so `n2s-improve
+--lex-min` optimizes against it) but is deliberately NOT in the
+`quality_score` weighted sum — it has no tuned weight and the
+overfitting audit warns against inventing one.
+
+First sweep confirms it sees what the eye saw: case 31 scores 0.62
+(labels printed over instance captions — `Q` over MN7, `CLK` over
+MN1, exactly the pairs visible in the render), 32 scores 0.73, while
+the previously-fixed 35/33 score 1.00/0.95. Not modeled in v1:
+pin-name texts (8px) and power-rail texts.
+
 ## Still uncovered after batch 2
 
 - **C1** (power net not sourced by a V/I device) — no myadc netlist

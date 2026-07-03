@@ -5,6 +5,7 @@ mod overlap;
 mod power_convention;
 pub mod score;
 mod symmetry;
+mod text_overlap;
 mod wire_bends;
 mod wire_crossings;
 mod wire_length;
@@ -20,6 +21,7 @@ pub use label_usage::LabelUsageReport;
 pub use overlap::OverlapReport;
 pub use power_convention::PowerConventionReport;
 pub use symmetry::SymmetryReport;
+pub use text_overlap::TextOverlapReport;
 pub use wire_bends::WireBendReport;
 pub use wire_crossings::WireCrossingReport;
 pub use wire_length::WireLengthReport;
@@ -35,6 +37,7 @@ pub struct EvalReport {
     pub label_usage: LabelUsageReport,
     pub symmetry: SymmetryReport,
     pub power_convention: PowerConventionReport,
+    pub text_overlap: TextOverlapReport,
 }
 
 /// Symbol table for the schematic's `subckt_*` box components: locally
@@ -68,9 +71,10 @@ fn subckt_symbol_table(pr: &ParseResult) -> HashMap<String, SymbolDef> {
 }
 
 pub fn evaluate(parse_result: &ParseResult, schematic: &Schematic) -> EvalReport {
+    let subckt_symbols = subckt_symbol_table(parse_result);
     EvalReport {
         connectivity: connectivity::check(parse_result, schematic),
-        component_overlap: overlap::check(schematic, &subckt_symbol_table(parse_result)),
+        component_overlap: overlap::check(schematic, &subckt_symbols),
         wire_crossings: wire_crossings::check(schematic),
         wire_length: wire_length::check(schematic),
         wire_bends: wire_bends::check(schematic),
@@ -78,5 +82,6 @@ pub fn evaluate(parse_result: &ParseResult, schematic: &Schematic) -> EvalReport
         label_usage: label_usage::check(schematic),
         symmetry: symmetry::check(schematic),
         power_convention: power_convention::check(schematic),
+        text_overlap: text_overlap::check(schematic, &subckt_symbols),
     }
 }
