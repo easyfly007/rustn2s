@@ -237,6 +237,28 @@ impl SpiceParser {
         "npn"
     }
 
+    /// Transistor polarity for X instances of PDK primitive subckts (e.g.
+    /// `sky130_fd_pr__nfet_01v8`, `sky130_fd_pr__pfet_01v8_hvt`), matched
+    /// on the model name's final `__` segment. Such primitives follow the
+    /// standard MOSFET port order (drain, gate, source, bulk), so callers
+    /// may apply the node-0/1/2 convention that M devices use. Returns
+    /// `None` for anything that doesn't look like a FET primitive —
+    /// arbitrary user subckts keep their opaque-box treatment.
+    pub fn infer_x_transistor_type(device: &SpiceDevice) -> Option<&'static str> {
+        if device.device_type != 'X' || device.nodes.len() < 3 {
+            return None;
+        }
+        let model = device.model_or_value.to_lowercase();
+        let seg = model.rsplit("__").next().unwrap_or(&model);
+        if seg.contains("nfet") || seg.contains("nmos") || seg.starts_with("nch") {
+            Some("nmos4")
+        } else if seg.contains("pfet") || seg.contains("pmos") || seg.starts_with("pch") {
+            Some("pmos4")
+        } else {
+            None
+        }
+    }
+
     // ========================================================================
     // Private helpers
     // ========================================================================

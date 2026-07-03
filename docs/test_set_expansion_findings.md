@@ -424,6 +424,45 @@ MN1, exactly the pairs visible in the render), 32 scores 0.73, while
 the previously-fixed 35/33 score 1.00/0.95. Not modeled in v1:
 pin-name texts (8px) and power-rail texts.
 
+## X-primitive signal-flow inference (2026-07-04)
+
+X instances of PDK FET primitives (`sky130_fd_pr__nfet_01v8` etc.)
+had no port semantics: no input/output nets, no DAG edges, no
+polarity — every all-X circuit degenerated to a flowless grid. New
+`SpiceParser::infer_x_transistor_type` matches the model name's final
+`__` segment (nfet/nmos/nch vs pfet/pmos/pch) and callers apply the
+standard (drain, gate, source, bulk) port order:
+
+- analyzer I/O inference treats X-FETs like M devices (gate → input
+  net, drain → output net) in both single-device and cluster blocks;
+- placer polarity sorting (PMOS-top) recognizes X-FETs via the same
+  helper.
+
+Case 34 now flows left→right (input pair at the left, latch at the
+right); case 30 shows functional grouping (latch column with PMOS on
+top). Honest cost: case 30's crossings dropped 1.00 → 0.33 — the old
+layout was a sparse label-everything grid with almost no wires, so
+zero crossings was an artifact, not quality.
+
+Two placer determinism fixes shaken out by the layout change:
+- `align_matched_pairs` iterated a HashMap, so pair-processing order
+  (and hence collision outcomes) varied per run — Tier 1 symmetry was
+  flaky on case 34. Groups are now processed in sorted-key order.
+- One sorted pass is order-dependent (a pair's destination can be
+  freed by a LATER pair's move — case 34's CL pair vs its CF
+  neighbours), so the pass iterates to a fixpoint (bounded at 3).
+- The isolated-block pass could pull a matched-pair member off its
+  freshly-aligned row via the in-place y-align branch; the paired
+  guard now covers both branches.
+
+**New gap identified**: a transistor's SOURCE net is neither input
+nor output in block I/O classification, so nothing "consumes" a tail
+or header device's drain net at the pair's source pins — under ALAP
+those devices sink to the LAST layer (case 34's XPT now sits top-right
+instead of beside XP1/XP2). Classifying pair-source nets as inputs
+would chain stacks in the DAG; blast radius covers all M circuits, so
+it needs its own pass of scrutiny.
+
 ## Still uncovered after batch 2
 
 - **C1** (power net not sourced by a V/I device) — no myadc netlist

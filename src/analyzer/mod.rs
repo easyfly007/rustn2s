@@ -554,8 +554,21 @@ impl CircuitAnalyzer {
         power_nets: &HashSet<String>,
     ) {
         let dev = &devices[block.device_indices[0]];
+        // X instances of PDK FET primitives follow the same
+        // (drain, gate, source) port order as M devices — without this,
+        // a lone sky130_fd_pr__*fet block has no I/O nets, no DAG edges,
+        // and floats in a column of its own (case 34's XPT tail header).
+        let is_x_fet = SpiceParser::infer_x_transistor_type(dev).is_some();
         match dev.device_type {
             'M' | 'Q' if dev.nodes.len() >= 3 => {
+                if !power_nets.contains(&dev.nodes[1].to_lowercase()) {
+                    block.input_nets.push(dev.nodes[1].clone());
+                }
+                if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
+                    block.output_nets.push(dev.nodes[0].clone());
+                }
+            }
+            'X' if is_x_fet => {
                 if !power_nets.contains(&dev.nodes[1].to_lowercase()) {
                     block.input_nets.push(dev.nodes[1].clone());
                 }
@@ -637,7 +650,10 @@ impl CircuitAnalyzer {
             let mut is_output = false;
             for &idx in &block.device_indices {
                 let dev = &devices[idx];
-                if (dev.device_type == 'M' || dev.device_type == 'Q') && dev.nodes.len() >= 3 {
+                let transistor_like = ((dev.device_type == 'M' || dev.device_type == 'Q')
+                    && dev.nodes.len() >= 3)
+                    || SpiceParser::infer_x_transistor_type(dev).is_some();
+                if transistor_like {
                     if dev.nodes[1] == *net {
                         is_input = true;
                     }

@@ -71,6 +71,16 @@ impl SchematicPlacer {
         }
     }
 
+    /// Symbol name used for polarity (PMOS-top / NMOS-bottom) sorting.
+    /// X instances of PDK FET primitives resolve to nmos4/pmos4 via the
+    /// model name so they sort like M devices; everything else keeps its
+    /// rendering symbol.
+    fn polarity_symbol(dev: &SpiceDevice) -> String {
+        SpiceParser::infer_x_transistor_type(dev)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| Self::symbol_for_device(dev))
+    }
+
     pub fn place(
         &self,
         blocks: &[FunctionalBlock],
@@ -289,114 +299,132 @@ impl SchematicPlacer {
             match_groups.entry(key).or_default().push(di);
         }
 
-        // For groups of exactly 2, align y-coordinates if in different blocks
-        for group in match_groups.values() {
-            if group.len() != 2 {
-                continue;
-            }
-
-            let di_a = group[0];
-            let di_b = group[1];
-
-            let block_a = match dev_to_block.get(&di_a) {
-                Some(&b) => b,
-                None => continue,
-            };
-            let block_b = match dev_to_block.get(&di_b) {
-                Some(&b) => b,
-                None => continue,
-            };
-
-            // Skip if same block (already handled by block template)
-            if block_a == block_b {
-                continue;
-            }
-
-            let pi_a = match dev_to_placement.get(&di_a) {
-                Some(&p) => p,
-                None => continue,
-            };
-            let pi_b = match dev_to_placement.get(&di_b) {
-                Some(&p) => p,
-                None => continue,
-            };
-
-            let y_a = placements[pi_a].position.y;
-            let y_b = placements[pi_b].position.y;
-            let y_diff = (y_a - y_b).abs();
-
-            // Only align if they're at meaningfully different y positions
-            if y_diff < opts.grid_size {
-                continue;
-            }
-
-            // A symmetric pair sits side-by-side; if the two devices are in
-            // the same column, aligning y would stack them onto the same
-            // point (case 34: XNR1/XNR2 collapsed to identical coordinates).
-            let (pi_a2, pi_b2) = (dev_to_placement[&di_a], dev_to_placement[&di_b]);
-            let x_gap = (placements[pi_a2].position.x - placements[pi_b2].position.x).abs();
-            let min_x_gap = (device_rects[di_a].width + device_rects[di_b].width) / 2.0;
-            if x_gap < min_x_gap {
-                continue;
-            }
-
-            // Candidate moves: prefer shifting the smaller block, but fall
-            // back to the other one if the first would collide (case 30:
-            // XN_TAIL's column is blocked at the target row, while XN_TAIL2
-            // can safely drop to XN_TAIL's row instead).
-            let size_a = blocks[block_a].device_indices.len();
-            let size_b = blocks[block_b].device_indices.len();
-            let candidates = if size_a <= size_b {
-                [(block_a, di_b, di_a), (block_b, di_a, di_b)]
-            } else {
-                [(block_b, di_a, di_b), (block_a, di_b, di_a)]
-            };
-
-            for (move_block, anchor_di, move_di) in candidates {
-                let anchor_pi = dev_to_placement[&anchor_di];
-                let move_pi = dev_to_placement[&move_di];
-
-                // Delta to align the moving device with the anchor's y
-                let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
-                if dy.abs() < opts.grid_size {
-                    break;
-                }
-
-                // Collision check: simulate the shift and skip it if any
-                // moved device would land on a stationary one (case 30: a
-                // block shift dropped XP2 exactly onto XN_TAIL).
-                let move_pis: HashSet<usize> = blocks[move_block]
-                    .device_indices
-                    .iter()
-                    .filter_map(|di| dev_to_placement.get(di).copied())
-                    .collect();
-                let collides = blocks[move_block].device_indices.iter().any(|&mdi| {
-                    let Some(&mpi) = dev_to_placement.get(&mdi) else {
-                        return false;
-                    };
-                    if mdi >= devices.len() {
-                        return false;
-                    }
-                    let moved_pos =
-                        Point::new(placements[mpi].position.x, placements[mpi].position.y + dy);
-                    placements.iter().enumerate().any(|(pi, p)| {
-                        !move_pis.contains(&pi)
-                            && p.device_index < devices.len()
-                            && rects_collide(mdi, moved_pos, p.device_index, p.position)
-                    })
-                });
-                if collides {
+        // For groups of exactly 2, align y-coordinates if in different blocks.
+        // Iterate in sorted-key order: HashMap order is random per run, and
+        // pairs processed earlier change the collision landscape for later
+        // ones — unsorted iteration made Tier 1 symmetry flaky (case 34
+        // passed or failed depending on the run).
+        let mut sorted_groups: Vec<(&String, &Vec<usize>)> = match_groups.iter().collect();
+        sorted_groups.sort_by_key(|(k, _)| k.as_str().to_string());
+        // Iterate to a fixpoint (bounded): an early pair's move can be
+        // blocked by a device that a LATER pair's move frees up (case 34:
+        // CL1 could not drop onto CF1's spot until the CF pair moved CF1
+        // away). One extra sweep lets those pairs align; the bound keeps
+        // pathological block-sharing from oscillating forever.
+        for _pass in 0..3 {
+            let mut moved_any = false;
+            for (_, group) in &sorted_groups {
+                if group.len() != 2 {
                     continue;
                 }
 
-                // Shift all devices in the moving block by dy
-                for &di in &blocks[move_block].device_indices {
-                    if let Some(&pi) = dev_to_placement.get(&di) {
-                        placements[pi].position.y += dy;
-                        placements[pi].position =
-                            placements[pi].position.snap_to_grid(opts.grid_size);
-                    }
+                let di_a = group[0];
+                let di_b = group[1];
+
+                let block_a = match dev_to_block.get(&di_a) {
+                    Some(&b) => b,
+                    None => continue,
+                };
+                let block_b = match dev_to_block.get(&di_b) {
+                    Some(&b) => b,
+                    None => continue,
+                };
+
+                // Skip if same block (already handled by block template)
+                if block_a == block_b {
+                    continue;
                 }
+
+                let pi_a = match dev_to_placement.get(&di_a) {
+                    Some(&p) => p,
+                    None => continue,
+                };
+                let pi_b = match dev_to_placement.get(&di_b) {
+                    Some(&p) => p,
+                    None => continue,
+                };
+
+                let y_a = placements[pi_a].position.y;
+                let y_b = placements[pi_b].position.y;
+                let y_diff = (y_a - y_b).abs();
+
+                // Only align if they're at meaningfully different y positions
+                if y_diff < opts.grid_size {
+                    continue;
+                }
+
+                // A symmetric pair sits side-by-side; if the two devices are in
+                // the same column, aligning y would stack them onto the same
+                // point (case 34: XNR1/XNR2 collapsed to identical coordinates).
+                let (pi_a2, pi_b2) = (dev_to_placement[&di_a], dev_to_placement[&di_b]);
+                let x_gap = (placements[pi_a2].position.x - placements[pi_b2].position.x).abs();
+                let min_x_gap = (device_rects[di_a].width + device_rects[di_b].width) / 2.0;
+                if x_gap < min_x_gap {
+                    continue;
+                }
+
+                // Candidate moves: prefer shifting the smaller block, but fall
+                // back to the other one if the first would collide (case 30:
+                // XN_TAIL's column is blocked at the target row, while XN_TAIL2
+                // can safely drop to XN_TAIL's row instead).
+                let size_a = blocks[block_a].device_indices.len();
+                let size_b = blocks[block_b].device_indices.len();
+                let candidates = if size_a <= size_b {
+                    [(block_a, di_b, di_a), (block_b, di_a, di_b)]
+                } else {
+                    [(block_b, di_a, di_b), (block_a, di_b, di_a)]
+                };
+
+                for (move_block, anchor_di, move_di) in candidates {
+                    let anchor_pi = dev_to_placement[&anchor_di];
+                    let move_pi = dev_to_placement[&move_di];
+
+                    // Delta to align the moving device with the anchor's y
+                    let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
+                    if dy.abs() < opts.grid_size {
+                        break;
+                    }
+
+                    // Collision check: simulate the shift and skip it if any
+                    // moved device would land on a stationary one (case 30: a
+                    // block shift dropped XP2 exactly onto XN_TAIL).
+                    let move_pis: HashSet<usize> = blocks[move_block]
+                        .device_indices
+                        .iter()
+                        .filter_map(|di| dev_to_placement.get(di).copied())
+                        .collect();
+                    let collides = blocks[move_block].device_indices.iter().any(|&mdi| {
+                        let Some(&mpi) = dev_to_placement.get(&mdi) else {
+                            return false;
+                        };
+                        if mdi >= devices.len() {
+                            return false;
+                        }
+                        let moved_pos =
+                            Point::new(placements[mpi].position.x, placements[mpi].position.y + dy);
+                        placements.iter().enumerate().any(|(pi, p)| {
+                            !move_pis.contains(&pi)
+                                && p.device_index < devices.len()
+                                && rects_collide(mdi, moved_pos, p.device_index, p.position)
+                        })
+                    });
+                    if collides {
+                        continue;
+                    }
+
+                    // Shift all devices in the moving block by dy
+                    for &di in &blocks[move_block].device_indices {
+                        if let Some(&pi) = dev_to_placement.get(&di) {
+                            placements[pi].position.y += dy;
+                            placements[pi].position =
+                                placements[pi].position.snap_to_grid(opts.grid_size);
+                        }
+                    }
+                    moved_any = true;
+                    break;
+                }
+            }
+            if !moved_any {
                 break;
             }
         }
@@ -553,9 +581,27 @@ impl SchematicPlacer {
                 .filter_map(|di| dev_to_placement.get(di).copied())
                 .collect();
 
+            // A non-source device whose match key appears exactly twice is a
+            // pair the symmetry metric scores, and align_matched_pairs (which
+            // ran just before this pass) owns its row. Any y-changing move
+            // here would undo that alignment — case 30's XN_TAIL2 was pulled
+            // off its freshly-aligned row by branch (A). Paired devices are
+            // limited to the sideways pull in branch (B).
+            let paired =
+                !all_sources && block.device_indices.len() == 1 && src_di < devices.len() && {
+                    let key = Self::device_match_key(&devices[src_di]);
+                    devices
+                        .iter()
+                        .filter(|d| {
+                            !matches!(d.device_type, 'V' | 'I') && Self::device_match_key(d) == key
+                        })
+                        .count()
+                        == 2
+                };
+
             // (A) In-place y-align: different columns, meaningful y move,
             // and every member's destination is collision-free.
-            if dx >= opts.intra_block_spacing && dy.abs() >= opts.grid_size {
+            if !paired && dx >= opts.intra_block_spacing && dy.abs() >= opts.grid_size {
                 let collides = block.device_indices.iter().any(|&mdi| {
                     let Some(&mpi) = dev_to_placement.get(&mdi) else {
                         return false;
@@ -604,19 +650,6 @@ impl SchematicPlacer {
             if block.device_indices.len() != 1 || src_di >= devices.len() {
                 continue;
             }
-            let src_dev = &devices[src_di];
-            let is_source = matches!(src_dev.device_type, 'V' | 'I');
-            let paired = !is_source && {
-                let key = Self::device_match_key(src_dev);
-                devices
-                    .iter()
-                    .filter(|d| {
-                        !matches!(d.device_type, 'V' | 'I') && Self::device_match_key(d) == key
-                    })
-                    .count()
-                    == 2
-            };
-
             let (sr, tr) = (device_rects[src_di], device_rects[target_di]);
             let clearance = 20.0;
             let cur = placements[src_pi].position;
@@ -691,7 +724,7 @@ impl SchematicPlacer {
             let mut has_nmos = false;
             for &di in &block.device_indices {
                 if di < devices.len() {
-                    let sym = Self::symbol_for_device(&devices[di]);
+                    let sym = Self::polarity_symbol(&devices[di]);
                     match sym.as_str() {
                         "pmos4" | "pnp" => has_pmos = true,
                         "nmos4" | "npn" => has_nmos = true,
@@ -1374,7 +1407,7 @@ impl SchematicPlacer {
                         if di >= all_devices.len() {
                             continue;
                         }
-                        let sym = Self::symbol_for_device(&all_devices[di]);
+                        let sym = Self::polarity_symbol(&all_devices[di]);
                         match sym.as_str() {
                             "pmos4" | "pnp" => has_p = true,
                             "nmos4" | "npn" => has_n = true,
