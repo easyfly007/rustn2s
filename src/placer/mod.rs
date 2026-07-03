@@ -1,5 +1,5 @@
 use crate::analyzer::{BlockType, FunctionalBlock};
-use crate::model::Point;
+use crate::model::{builtin_symbols, Point};
 use crate::parser::{SpiceDevice, SpiceParser};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -984,6 +984,18 @@ impl SchematicPlacer {
     // Block-internal template layout
     // ========================================================================
 
+    /// Horizontal footprint of the symbol a device renders as, including the
+    /// 15px pin stubs on both sides of a subcircuit box. Builtin symbols are
+    /// all ~60px wide; X-instance boxes grow with the display-name length
+    /// (see `subckt_box_size`), so side-by-side templates must budget for it.
+    fn device_width(dev: &SpiceDevice) -> f64 {
+        if dev.device_type == 'X' {
+            builtin_symbols::subckt_box_size(&dev.model_or_value, dev.nodes.len()).0 + 30.0
+        } else {
+            60.0
+        }
+    }
+
     fn layout_block(
         block: &FunctionalBlock,
         all_devices: &[SpiceDevice],
@@ -992,21 +1004,37 @@ impl SchematicPlacer {
         let sp = opts.intra_block_spacing;
         let devices = &block.device_indices;
 
+        // Width lookup with a safe fallback for the device-less `place()`
+        // path (all_devices empty → every width is the builtin 60).
+        let dev_w = |di: usize| -> f64 {
+            if di < all_devices.len() {
+                Self::device_width(&all_devices[di])
+            } else {
+                60.0
+            }
+        };
+        // Center-to-center pitch for two devices sitting side by side:
+        // at least the configured spacing, and at least wide enough that
+        // the two footprints don't touch (10px clearance).
+        let pair_pitch = |a: usize, b: usize| -> f64 { sp.max((dev_w(a) + dev_w(b)) / 2.0 + 10.0) };
+
         match block.block_type {
             BlockType::DiffPair => {
                 let mut placements = Vec::new();
                 if devices.len() >= 2 {
+                    let pitch = pair_pitch(devices[0], devices[1]);
+                    let w = pitch + dev_w(devices[0]).max(dev_w(devices[1]));
                     placements.push((
                         devices[0],
                         String::new(),
-                        Point::new(-sp / 2.0, 0.0),
+                        Point::new(-pitch / 2.0, 0.0),
                         0,
                         false,
                     ));
                     placements.push((
                         devices[1],
                         String::new(),
-                        Point::new(sp / 2.0, 0.0),
+                        Point::new(pitch / 2.0, 0.0),
                         0,
                         false,
                     ));
@@ -1014,13 +1042,13 @@ impl SchematicPlacer {
                         placements.push((devices[2], String::new(), Point::new(0.0, sp), 0, false));
                         return InternalLayout {
                             placements,
-                            width: sp + 60.0,
+                            width: w,
                             height: sp + 40.0,
                         };
                     }
                     return InternalLayout {
                         placements,
-                        width: sp + 60.0,
+                        width: w,
                         height: 40.0,
                     };
                 }
@@ -1033,14 +1061,16 @@ impl SchematicPlacer {
             BlockType::CurrentMirror => {
                 let mut placements = Vec::new();
                 let mut x = 0.0;
-                for &idx in devices {
+                for (i, &idx) in devices.iter().enumerate() {
+                    if i > 0 {
+                        x += pair_pitch(devices[i - 1], idx);
+                    }
                     placements.push((idx, String::new(), Point::new(x, 0.0), 0, false));
-                    x += sp;
                 }
                 let w = if devices.len() > 1 {
-                    (devices.len() - 1) as f64 * sp + 60.0
+                    x + dev_w(devices[0]).max(dev_w(*devices.last().unwrap()))
                 } else {
-                    60.0
+                    devices.first().map(|&d| dev_w(d)).unwrap_or(60.0)
                 };
                 InternalLayout {
                     placements,
@@ -1168,23 +1198,24 @@ impl SchematicPlacer {
                     let group = &key_groups[key];
                     if group.len() == 2 {
                         // Matched pair → horizontal split
+                        let pitch = pair_pitch(group[0], group[1]);
                         placements.push((
                             group[0],
                             String::new(),
-                            Point::new(-sp / 2.0, y),
+                            Point::new(-pitch / 2.0, y),
                             0,
                             false,
                         ));
                         placements.push((
                             group[1],
                             String::new(),
-                            Point::new(sp / 2.0, y),
+                            Point::new(pitch / 2.0, y),
                             0,
                             false,
                         ));
                         emitted.insert(group[0]);
                         emitted.insert(group[1]);
-                        max_width = max_width.max(sp + 60.0);
+                        max_width = max_width.max(pitch + dev_w(group[0]).max(dev_w(group[1])));
                         y += sp;
                     } else {
                         // Singletons and 3+-groups: stack vertically in original order.

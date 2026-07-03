@@ -413,23 +413,35 @@ pub mod builtin_symbols {
 
     /// Create a dynamic symbol for a subcircuit instance.
     /// Rendered as a rectangular box with labeled ports on left and right sides.
+    /// Body size (width, height) of a dynamically created subcircuit box,
+    /// excluding the 15px pin stubs on either side. Standalone so the placer
+    /// can budget the same footprint without building the full SymbolDef.
+    pub fn subckt_box_size(subckt_name: &str, port_count: usize) -> (f64, f64) {
+        let left_count = port_count.div_ceil(2);
+        let right_count = port_count - left_count;
+        // PDK device names are long and hierarchical (e.g.
+        // `sky130_fd_pr__nfet_01v8`). Show only the final `__`-segment so the
+        // label fits — `nfet_01v8` rather than the whole library path.
+        let display_name = subckt_name.rsplit("__").next().unwrap_or(subckt_name);
+        let pin_spacing = 20.0;
+        let box_height = (left_count.max(right_count).max(1) as f64) * pin_spacing + 10.0;
+        // Width adapts to the label (~6.5px per char at font-size 10) so the
+        // name never spills out of the box onto neighbouring symbols.
+        let box_width = 60.0_f64.max(display_name.len() as f64 * 6.5 + 16.0);
+        (box_width, box_height)
+    }
+
     pub fn create_subcircuit_symbol(subckt_name: &str, port_names: &[String]) -> SymbolDef {
         let n = port_names.len();
         // Split ports: first half on left, second half on right
         let left_count = n.div_ceil(2);
         let right_count = n - left_count;
 
-        // PDK device names are long and hierarchical (e.g.
-        // `sky130_fd_pr__nfet_01v8`). Show only the final `__`-segment so the
-        // label fits — `nfet_01v8` rather than the whole library path.
         let display_name = subckt_name.rsplit("__").next().unwrap_or(subckt_name);
 
         let pin_spacing = 20.0;
-        let box_height = (left_count.max(right_count).max(1) as f64) * pin_spacing + 10.0;
+        let (box_width, box_height) = subckt_box_size(subckt_name, n);
         let half_h = box_height / 2.0;
-        // Width adapts to the label (~6.5px per char at font-size 10) so the
-        // name never spills out of the box onto neighbouring symbols.
-        let box_width = 60.0_f64.max(display_name.len() as f64 * 6.5 + 16.0);
         let half_w = box_width / 2.0;
 
         let mut pins = Vec::new();

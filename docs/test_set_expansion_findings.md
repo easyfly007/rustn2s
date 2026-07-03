@@ -328,13 +328,25 @@ object to".
 ## Open visual defects (not yet fixed)
 
 2. **Net-label boxes drawn on top of subckt-box symbols** (33, 34,
-   35; also mildly on MOSFET captions in 31/32). When a device
-   renders as a subckt box, pin net-labels are placed at the pin
-   position, which is on/inside the box outline — label and box
-   obscure each other, and the box's type name is unreadable. This is
-   the P1 text-overlap family, but for `label_offset` on box symbols
-   rather than captions. Score does not see it (34 scored
-   quality=0.77 while being visually illegible).
+   35). ~~When a device renders as a subckt box, pin net-labels are
+   placed at the pin position, which is on/inside the box outline.~~
+   **FIXED (2026-07-03, follow-up commits).** Root cause was not the
+   label offset at all: X instances whose subckt is defined only in a
+   `.lib`/`.include` (all sky130 primitives) had **no SymbolDef** —
+   the router collapsed every pin (and its label) to the component
+   centre and the SVG drew a blank fallback rectangle. Fix 1:
+   `convert_full` now synthesizes a generic numbered-pin box symbol
+   for every X model without a local definition, so pins sit on box
+   edges and labels land beside them. Fix 2: the synthesized boxes
+   are wider than the 60px the placer's side-by-side templates
+   assumed, which made matched pairs overlap; `layout_block` now
+   budgets real footprints (`subckt_box_size`) for DiffPair /
+   CurrentMirror / Unknown-pair pitches. Two things the score never
+   saw: label-on-box illegibility (34 scored quality=0.77 while
+   illegible) and the box-pair overlap — the `overlap` eval skips
+   any component whose symbol_name isn't a *builtin* symbol, so
+   subckt boxes are invisible to the Tier 1 no_overlap check. That
+   evaluator gap is now the open item (see below).
 
 3. **Isolated blocks still float** (34: `VVDD` far left, `XPT`
    detached; 35: `XNC` alone bottom-right). The P3 partial fix
@@ -346,6 +358,15 @@ object to".
    `wire=0.04`, shape=0.15. HAC + Sugiyama produce a very wide,
    sparse canvas. This is the documented scale ceiling, now with a
    7×-larger probe than case 29.
+
+## New evaluator gap found while fixing defect 2
+
+- **`eval/overlap` is blind to subckt boxes.** It sizes components
+  from `builtin_symbols::all()` only and skips unknown symbol names,
+  so overlapping X-instance boxes never fail Tier 1 no_overlap (34's
+  pair overlap sailed through). Fixing it needs the eval to either
+  receive the schematic's synthesized symbol table or apply the same
+  `subckt_box_size` estimate to `subckt_*` names.
 
 ## Still uncovered after batch 2
 

@@ -62,7 +62,7 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
     let has_subckt_defs = !pr.subcircuits.is_empty();
     let use_hierarchical = (opts.hierarchical || has_x_instances) && has_subckt_defs;
 
-    let (devices, subckt_symbols) = if use_hierarchical {
+    let (devices, mut subckt_symbols) = if use_hierarchical {
         // Hierarchical mode: top-level devices, render X instances as boxes
         let syms = build_subcircuit_symbols(&pr);
         (&pr.devices, syms)
@@ -74,6 +74,21 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
         // Simple mode: top-level devices only
         (&pr.devices, HashMap::new())
     };
+
+    // Synthesize a generic box symbol for every X instance whose subcircuit
+    // is NOT defined in this file (typical for PDK primitives resolved via
+    // .lib/.include, e.g. sky130_fd_pr__nfet_01v8). Port names are unknown,
+    // so pins are numbered by node position. Without this, such devices had
+    // no SymbolDef at all: the router collapsed every pin (and its net
+    // label) onto the component centre, and the SVG fell back to a blank
+    // rectangle -- labels printed on top of boxes.
+    for dev in devices.iter().filter(|d| d.device_type == 'X') {
+        let key = format!("subckt_{}", dev.model_or_value);
+        subckt_symbols.entry(key).or_insert_with(|| {
+            let ports: Vec<String> = (1..=dev.nodes.len()).map(|i| i.to_string()).collect();
+            builtin_symbols::create_subcircuit_symbol(&dev.model_or_value, &ports)
+        });
+    }
 
     if devices.is_empty() {
         return Err("No devices found in SPICE input".into());
