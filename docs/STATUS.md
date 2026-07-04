@@ -1,137 +1,110 @@
-# Project Status (2026-07-04)
+# Project Status (2026-07-04, end of day)
 
 A handoff note for whoever picks this up next (possibly a fresh
-Claude session with no memory of the last three days' ~15 commits).
+Claude session with no memory of today's 22 commits).
 
-Read this first. Then `docs/test_set_expansion_findings.md` for the
-full find/fix log of the real-world validation campaign, or
-`docs/overfitting_audit.md` before you feel tempted to tune any
-constant.
+Read this first. Then `docs/scale_placement.md` for the scale
+campaign (measured evidence → phased fixes, all landed),
+`docs/test_set_expansion_findings.md` for the find/fix log of the
+real-world validation campaign, and `docs/overfitting_audit.md`
+before you feel tempted to tune any constant.
 
 ---
 
 ## Where things stand
 
-**State**: stable. Working tree clean, ~164 tests pass, all commits
-pushed to `origin/main`.
+**State**: stable. Working tree clean, 173 tests pass, all commits
+pushed to `origin/main`. The full 46-case convert+eval sweep runs in
+**0.6 s** total.
 
-**Test set**: 41 circuits in `tests/examples/`, three sources:
-- 01–25: MySchematic suite + 2026-05-01 adversarial expansion;
-- 26–36: real netlists from the sibling `myadc` SAR-ADC repo
-  (batches 1–2);
-- 37–41: sky130 stdcell library cells + hand-written probes for
-  audit items C1/C2 (batch 3).
-All 41 pass Tier 1 safety, deterministically (placer alignment is
-now sorted + fixpoint-iterated; HashMap-order flakiness in Tier 1 is
-gone, though Tier 2 scores still jitter slightly).
+**Test set**: 46 circuits in `tests/examples/`, five authors:
+- 01–25: MySchematic C++ suite + hand-written adversarial cases;
+- 26–36: real netlists from the sibling `myadc` SAR-ADC repo;
+- 37–39: SkyWater sky130 stdcell library cells;
+- 40–41: hand-written audit probes (C1 LDO rail, C2 opaque models);
+- 42–43: OpenRAM-generated SRAM decoder + replica column;
+- 44–46: ngspice distribution examples + xschem Verilog-import
+  post-PnR multiplier (1188 instances, the scale record).
 
-**Eval**: two-tier API, now with a fifth Tier 2 sub-score:
+All 46 pass Tier 1 safety, deterministically (every HashMap-ordered
+decision point that affects geometry now iterates sorted keys; Tier 2
+scores still jitter a little on a few circuits — case 16 flips
+between 0.575/0.647 run to run).
+
+**Eval**: two-tier API.
 - Tier 1 — `SafetyReport { no_overlap, power_convention_clean,
-  symmetry_clean }`. All hardened this cycle: overlap sizes subckt
-  boxes (was blind to them), power_convention pairs each PMOS with
-  its nearest same-column NMOS (|dx| < one symbol width), symmetry
-  accepts vertical stacks as clean.
+  symmetry_clean }`, all hardened this cycle: overlap sizes every box
+  (builtin, local-def, synthesized, gate), power_convention pairs
+  each PMOS with its nearest same-column NMOS within one symbol
+  width, symmetry accepts vertical stacks and excludes non-FET boxes
+  and V/I sources from pairing.
 - Tier 2 — `QualityProfile { aspect_ratio, crossings, wire_length,
-  label_ratio, text_clarity }`. `text_clarity` (label/caption
-  collisions vs text and symbol bodies) joins the lex-min
-  comparators but NOT the weighted sum (no tuned weight, on purpose).
+  label_ratio, text_clarity }`. `text_clarity` (text-vs-text and
+  text-vs-body collisions, mirroring the SVG renderer's geometry) is
+  in the lex-min comparators but deliberately NOT in the weighted sum.
+- Metric-artifact warning that keeps proving itself: wire-less
+  components inflate ratio denominators (case 46 scored HIGHER with
+  700 filler boxes than without), and zero-crossing scores can mean
+  "no real wires" rather than "clean routing". Trust the eye first.
 
-**Pipeline changes this cycle** (all documented with reasoning in
-`test_set_expansion_findings.md`):
-- X instances without local `.subckt` defs get synthesized box
-  symbols; placer templates budget their real footprints.
-- X instances of PDK FET primitives (`*nfet*`/`*pfet*` model names)
-  get full port semantics: DAG direction, layering, polarity sort.
-- Isolated blocks (sources OR lone devices) relocate beside their
-  loads when a pure y-shift can't help (the P3 remainder).
-- Netlist comment directives: `* n2s: power_net <name>` declares
-  rails the tool cannot discover (audit C1); `* n2s: pmos_model /
-  nmos_model <name>` declares polarity for foundry-opaque model
-  names (audit C2).
+**Pipeline capabilities added this cycle** (each with reasoning in
+the findings doc or scale_placement.md):
+- Synthesized box symbols for X instances without local defs; real
+  footprints budgeted throughout placer templates and eval.
+- X-FET port semantics (`sky130_fd_pr__*fet` etc.): DAG direction,
+  polarity sorting, and pattern matching all work on all-X netlists.
+- Source/emitter nets classify as block inputs (tail/header devices
+  sit beside the pairs they feed).
+- Netlist directives (comment-based, `* n2s: <directive> ...`):
+  `power_net <name>...` (audit C1) and `pmos_model / nmos_model
+  <name>...` (audit C2). Both audit items are CLOSED.
+- SkyWater rail vocabulary (vpwr/vgnd/vpb/vnb) in all five hardcoded
+  rail lists.
+- **Scale regime** (>= 60 components, shared across placer and
+  router): CMOS gate extraction collapses INV/NAND2/3/NOR2/3 into
+  labeled boxes (exact on case 32's ground truth); depth folding
+  wraps >= 12-layer designs into square-ish bands; high-fanout nets
+  (> 4 pins) are label-routed; the adaptive label threshold stops
+  growing with the canvas; A* obstacle avoidance turns on
+  automatically. Small/analog circuits are untouched by ALL of this.
+- Collision-aware label anchors (candidate ladder, checked against
+  body rects and other labels) and A*-failure → label fallback:
+  through-body wires on case 36 went 143 → 36.
+- Physical-only cells (X instances with all-power pins) filtered by
+  default; `--keep-physical-cells` opts out.
+- Performance: A* uses sparse state + an expansion budget (was
+  ~50 MB dense allocation per call); HAC scores only net-sharing
+  cluster pairs (was all-C² scans). Case 46: 42 s → 0.16 s.
+- `N2S_DEBUG_STATS=1` prints placer structure stats (blocks,
+  singletons, DAG edges, layer widths) to stderr — the diagnostic
+  that root-caused the scale campaign.
 
 ---
 
-## Known gaps, deliberately left open
+## What's left (in priority order)
 
-- **Scale (cases 29/36)**: root-caused and designed, not yet built —
-  see `docs/scale_placement.md` (2026-07-04). Headline findings: the
-  "hairball" is a 261-layer 1-wide ribbon plus a 130-block ALAP dump
-  layer; HAC has an early-exit bug (the max_cluster_size check
-  `break`s ALL clustering on the first capped merge — case 36 ends
-  with 678 singletons); pattern matchers don't accept X-FETs (the
-  M-card DFF gets 8 pattern blocks, the identical X-card DFF gets 18
-  singletons). Plan: Phase 0 = fix those two + re-measure (decision
-  gate), Phase 1 = CMOS gate extraction → collapse to boxes → the
-  existing Sugiyama at gate granularity.
-
-## What to do next (in priority order)
-
-(Source-pin input classification — the former #1 — landed on
-2026-07-04: sources/emitters are block inputs, external diff-pair
-tails are inputs, XPT sits beside its pair. See the findings doc.)
-
-(SkyWater rails — the former #1 — resolved on 2026-07-04:
-`vpwr`/`vgnd`/`vpb`/`vnb` joined the builtin vocabulary across all
-five hardcoded rail lists; they are ecosystem-standard names, not
-tuning. Cases 37–39 improved across the board.)
-
-(Scale Phase 0 landed 2026-07-04: HAC early-exit fixed, X-FET
-pattern matching on, case 29 transformed (33 layers → 2). Decision
-from the re-measure: case 36 still needs Phase 1 — see
-scale_placement.md for the numbers.)
-
-(Scale Phase 1 landed 2026-07-04: `analyzer::gates` extracts
-INV/NAND/NOR by channel-graph matching — exact on case 32's ground
-truth — and collapses them to real-direction boxes in the scale
-regime. Case 36: 173 gates, layers 131→67, canvas halved. Batch 4
-added OpenRAM cases 42/43 as the prerequisite.)
-
-(Scale Phase 2 landed 2026-07-04: depth folding — 36's ribbon became
-a 2 930 x 10 570 banded page, shape 0.10 → 0.81 — plus kind-sorted
-grid distribution for bus alignment, polarity class as primary key.)
-
-(Scale Phase 3 landed 2026-07-04: high-fanout nets label-routed,
-adaptive threshold capped, and A* auto-on at scale. Scoreboard:
-29: 0.26→0.41, 36: 0.27→0.47, 42: 0.98, 43: 0.95. The scale campaign
-in scale_placement.md is complete through Phase 3.)
-
-(Routing Phase C resolved 2026-07-04 WITHOUT channel routing: the
-~100 through-body survivors were mis-anchored label stubs, not failed
-routes. A*-failure now labels instead of drawing dirty wires, and
-label anchors are collision-aware. 36's through-body wires: 143 → 36.
-See routing_improvement.md.)
-
-(Batch 5 landed 2026-07-04: cases 44–46 from two new authors —
-ngspice distribution + xschem Verilog-import. Case 46 (1188 instances,
-post-PnR) found a Tier-1 symmetry bug (non-FET boxes paired as
-mirrors; exclusion generalized) and two performance cliffs (A* dense
-state ~50 MB/call; HAC all-pairs scan) — full 46-case sweep now 0.6 s.)
-
-(C2 resolved 2026-07-04: `n2s: pmos_model / nmos_model` directives;
-case 41 now renders M5 correctly and documents how to reproduce the
-original failure. The audit's last open item is closed.)
-
-(Physical-cell filter landed 2026-07-04: X instances whose every pin
-is a power net are dropped by default — a structural, foundry-neutral
-rule, `--keep-physical-cells` opts out. Case 46: 1188 → 390
-components, canvas area ÷4.8, only real logic remains. Its quality
-number DROPPED 0.48 → 0.33 — the filler boxes had been inflating
-every ratio metric's denominator; the filtered page is the honest
-one.)
-
-1. **True channel routing** — only if the last ~36 congestion stubs
-   ever matter enough; payoff now small.
-2. **More sources / periodic re-validation** — the corpus has 5
-   authors and 46 cases; keep adding when new netlist styles appear
-   (untapped: audiodac.spice 4896 lines, xschem .sch designs,
-   Berkeley course circuits).
+1. **Corpus growth / periodic re-validation** — five authors and 46
+   cases is good; every new netlist style still finds something.
+   Untapped and known-reachable: `audiodac.spice` (4 896 lines, same
+   xschem flow), xschem `.sch` designs (need xschem to netlist),
+   Berkeley course circuits (network access works in this
+   environment — batch 5 fetched ngspice examples from GitHub raw).
+2. **True channel routing** — only if the last ~36 congestion label
+   stubs on case 36 or trunk-crossing aesthetics ever matter enough;
+   `routing_improvement.md` explains why the payoff shrank.
+3. **Small visual nits** (accumulate before acting): pin-number
+   digits on synthesized boxes are mild noise; power symbols crowd
+   the gap between tightly paired boxes; case-16-class Tier 2 jitter.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 
 Do not tune `ScoreWeights`, `merge_threshold`, `max_cluster_size`,
 `bend_penalty`, `crossing_penalty`, or the `n2s-improve` presets.
-If a regression appears, find the test data that triggers it; don't
-move a constant until the suite says the constant is the problem.
+The scale-regime gates (60 components, 4-pin fanout, 12 layers, 0.5
+gate coverage) are REGIME SELECTORS calibrated against measured
+specimens, documented in scale_placement.md — they are not layout
+knobs and also should not be nudged to move a score. If a regression
+appears, find the test data that triggers it.
 
 ---
 
@@ -139,9 +112,9 @@ move a constant until the suite says the constant is the problem.
 
 ```bash
 cargo build --release
-cargo test                    # ~164 tests, all green expected
+cargo test                    # 173 tests, all green expected
 
-# Full sweep with the two-tier profile (txt= is the new column)
+# Full sweep with the two-tier profile (~0.6 s for all 46)
 mkdir -p output
 for f in tests/examples/*.sp; do
   name=$(basename "$f" .sp)
@@ -149,23 +122,38 @@ for f in tests/examples/*.sp; do
   ./target/release/n2s-eval -n "$f" -s "output/${name}.json" --profile
 done
 
-# Render SVG → PNG for visual inspection (cairosvg is installed)
-python3 -c "import cairosvg; cairosvg.svg2png(url='output/34_pmos_comparator_sky130.svg', write_to='/tmp/34.png', scale=2)"
+# Placer structure diagnostics (the scale-campaign workhorse)
+N2S_DEBUG_STATS=1 ./target/release/n2s tests/examples/36_sar_logic_flat_sky130.sp -o /tmp/x.json
+
+# Render SVG → PNG for visual inspection (cairosvg is installed;
+# scale down for the big cases)
+python3 -c "import cairosvg; cairosvg.svg2png(url='output/46_spm_postpnr_sky130.svg', write_to='/tmp/46.png', scale=0.5)"
+
+# Netlist directives (in-file comments)
+#   * n2s: power_net vreg
+#   * n2s: pmos_model g45p1svt
+#   * n2s: nmos_model g45n1svt
 ```
 
 ---
 
-## A reminder to future self
-
-Two lessons this cycle, both rhymes of the 2026-05-01 one:
+## Lessons this cycle (rhymes with 2026-05-01's)
 
 1. **Every blind spot you close catches real bugs the same day.**
-   The overlap-sees-boxes fix immediately flagged three placement
-   bugs; the C1 probe failed Tier 1 on first run. Metrics that can't
-   see a defect class are worse than no metric — they certify junk.
+   Overlap-sees-boxes flagged three placement bugs within minutes;
+   the C1 probe failed Tier 1 on first run; case 46 found a Tier 1
+   bug plus two performance cliffs on its first conversion.
 2. **Guards must share geometry with the metrics they defend.**
-   The first collision guard used a coarser size estimate than the
-   overlap metric and broke a legitimate alignment; the fix was to
-   make placer guards and eval checks read the same symbol rects.
-   When two subsystems disagree about geometry, you get either false
-   alarms or silent overlaps — never neither.
+   Placer collision guards, eval overlap, and label placement all
+   read the same symbol rects now; every time two subsystems had
+   different ideas about size, we got either false vetoes (case 06)
+   or silent overlaps (case 34).
+3. **Diagnose before building.** Phase C's planned ~500-line channel
+   router dissolved into two 30-line fixes once the "through-body
+   wires" were actually inspected (they were mis-anchored label
+   stubs). The scale campaign's biggest wins were a one-line `break`
+   bug and a match-arm addition.
+4. **Fixed pipelines want regime gates, not new constants.** Scale
+   behavior changes are all gated on measured regime selectors, so
+   46 analog circuits stay bit-identical while the big ones get a
+   different strategy.
