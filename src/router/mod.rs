@@ -1,5 +1,5 @@
 use crate::model::{
-    builtin_symbols, Component, Junction, Label, PinDirection, Point, PowerSymbol, PowerType,
+    builtin_symbols, Component, Junction, Label, PinDirection, Point, PowerSymbol, PowerType, Rect,
     Schematic, SymbolDef, Wire,
 };
 use crate::parser::SpiceDevice;
@@ -170,6 +170,37 @@ impl SchematicRouter {
         for (k, v) in subckt_symbols {
             symbol_map.insert(k.clone(), v.clone());
         }
+
+        // Component body rects in world coords, for collision-aware label
+        // placement (Phase C follow-up): in dense box grids the default
+        // 30px outward label anchor can land inside a NEIGHBORING box —
+        // case 36's ~100 "through-body wires" were all 30px label stubs
+        // whose anchors sat in the adjacent component.
+        let body_rects: Vec<Rect> = schematic
+            .components
+            .iter()
+            .filter_map(|comp| {
+                let base = symbol_map.get(&comp.symbol_name)?.bounding_rect();
+                let corners = [
+                    Point::new(base.left(), base.top()),
+                    Point::new(base.right(), base.top()),
+                    Point::new(base.left(), base.bottom()),
+                    Point::new(base.right(), base.bottom()),
+                ];
+                let mut min_x = f64::MAX;
+                let mut min_y = f64::MAX;
+                let mut max_x = f64::MIN;
+                let mut max_y = f64::MIN;
+                for c in &corners {
+                    let t = c.transform(comp.rotation, comp.mirrored);
+                    min_x = min_x.min(comp.position.x + t.x);
+                    min_y = min_y.min(comp.position.y + t.y);
+                    max_x = max_x.max(comp.position.x + t.x);
+                    max_y = max_y.max(comp.position.y + t.y);
+                }
+                Some(Rect::new(min_x, min_y, max_x - min_x, max_y - min_y))
+            })
+            .collect();
         // Scale Phase 3: obstacle avoidance turns ON automatically in the
         // scale regime. In box-dense gate/cell grids, L-routes blow through
         // component bodies constantly; A* body-dodging is a large win in
@@ -229,6 +260,7 @@ impl SchematicRouter {
                     effective_threshold,
                     obstacle_grid.as_mut(),
                     force_labels,
+                    &body_rects,
                 );
             }
         }
@@ -268,6 +300,7 @@ impl SchematicRouter {
         long_net_threshold: f64,
         grid: Option<&mut astar::ObstacleGrid>,
         force_labels: bool,
+        body_rects: &[Rect],
     ) {
         if pins.len() < 2 {
             return;
@@ -278,7 +311,7 @@ impl SchematicRouter {
         // not information).
         if force_labels {
             let label_pins: HashSet<usize> = (0..pins.len()).collect();
-            self.emit_labels(schematic, net_name, pins, &label_pins, opts);
+            self.emit_labels(schematic, net_name, pins, &label_pins, opts, body_rects);
             return;
         }
 
@@ -320,8 +353,26 @@ impl SchematicRouter {
                 let l_route = l_route_best(from, to, &schematic.wires);
                 let wire_pts = match grid_ref.as_deref() {
                     Some(g) if !g.polyline_clear(&l_route) => {
-                        astar::find_path(g, from, to, opts.bend_penalty, opts.crossing_penalty)
-                            .unwrap_or(l_route)
+                        match astar::find_path(
+                            g,
+                            from,
+                            to,
+                            opts.bend_penalty,
+                            opts.crossing_penalty,
+                        ) {
+                            Some(path) => path,
+                            // Phase C resolution (routing_improvement.md):
+                            // when the grid has NO clean path, a wire would
+                            // have to pass through a component body. Don't
+                            // draw it — label both endpoints instead. An
+                            // unroutable edge labeled is standard schematic
+                            // practice; a wire through a symbol is a defect.
+                            None => {
+                                label_pins.insert(i);
+                                label_pins.insert(j);
+                                continue;
+                            }
+                        }
                     }
                     _ => l_route,
                 };
@@ -339,7 +390,7 @@ impl SchematicRouter {
             }
         }
 
-        self.emit_labels(schematic, net_name, pins, &label_pins, opts);
+        self.emit_labels(schematic, net_name, pins, &label_pins, opts, body_rects);
 
         // Junction at any pin connected by more than one MST edge
         let mut edge_count = vec![0usize; pins.len()];
@@ -364,13 +415,54 @@ impl SchematicRouter {
         pins: &[PinInfo],
         label_pins: &HashSet<usize>,
         opts: &RouterOptions,
+        body_rects: &[Rect],
     ) {
+        // A label rect is 50x16 centered on its anchor; reject anchors whose
+        // rect intrudes into any component body (in dense grids the default
+        // outward offset can land inside a NEIGHBOR component) or overlaps
+        // an already-placed label from ANY net.
+        let mut anchors_taken: Vec<Point> = schematic.labels.iter().map(|l| l.position).collect();
+        let label_clear = |anchor: Point, taken: &[Point]| -> bool {
+            let (l, r) = (anchor.x - 25.0, anchor.x + 25.0);
+            let (t, b) = (anchor.y - 8.0, anchor.y + 8.0);
+            let body_hit = body_rects.iter().any(|br| {
+                l + 1.0 < br.right()
+                    && br.left() + 1.0 < r
+                    && t + 1.0 < br.bottom()
+                    && br.top() + 1.0 < b
+            });
+            let label_hit = taken
+                .iter()
+                .any(|p| (p.x - anchor.x).abs() < 50.0 && (p.y - anchor.y).abs() < 16.0);
+            !body_hit && !label_hit
+        };
+
         // The label sits at pin_pos + label_offset so it clears the component
         // graphic, and a short stub wire connects the pin to the label anchor.
         let mut labeled_positions: Vec<Point> = Vec::new();
         for &pi in label_pins {
             let pin = &pins[pi];
-            let label_pos = (pin.position + pin.label_offset).snap_to_grid(opts.grid_size);
+            let off = pin.label_offset;
+            // Candidate anchors in preference order: the default outward
+            // offset, further out, perpendicular (above/below), flipped.
+            let candidates = [
+                pin.position + off,
+                // Diagonal: outward AND into the inter-row gap — in dense
+                // grids the horizontal channel has no 50px slot, but the
+                // row gap (inter_block_spacing) does.
+                pin.position + Point::new(off.x, off.y - 25.0),
+                pin.position + Point::new(off.x, off.y + 25.0),
+                pin.position + Point::new(off.x * 2.5, off.y * 2.5),
+                pin.position + Point::new(off.x * 2.5, off.y - 25.0),
+                pin.position + Point::new(off.x * 2.5, off.y + 25.0),
+                pin.position + Point::new(-off.x, -off.y),
+            ];
+            let label_pos = candidates
+                .iter()
+                .map(|p| p.snap_to_grid(opts.grid_size))
+                .find(|p| label_clear(*p, &anchors_taken))
+                .unwrap_or_else(|| (pin.position + off).snap_to_grid(opts.grid_size));
+            anchors_taken.push(label_pos);
 
             // Skip duplicate labels at the same anchor point
             if labeled_positions.iter().any(|p| close(p, &label_pos)) {

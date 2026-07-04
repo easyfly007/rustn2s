@@ -98,12 +98,17 @@ adaptive threshold capped, and A* auto-on at scale. Scoreboard:
 29: 0.26→0.41, 36: 0.27→0.47, 42: 0.98, 43: 0.95. The scale campaign
 in scale_placement.md is complete through Phase 3.)
 
+(Routing Phase C resolved 2026-07-04 WITHOUT channel routing: the
+~100 through-body survivors were mis-anchored label stubs, not failed
+routes. A*-failure now labels instead of drawing dirty wires, and
+label anchors are collision-aware. 36's through-body wires: 143 → 36.
+See routing_improvement.md.)
+
 1. **More external sources** — ngspice examples, Berkeley circuits.
-2. **Routing Phase C (channel routing)** — the remaining headroom on
-   case 36 (113 through-body wires where A* has no path, detour
-   crossings); see routing_improvement.md.
-3. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
+2. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
    directive (case 41 keeps the gap visible).
+3. **True channel routing** — only if the last ~36 congestion stubs
+   and trunk crossings ever matter enough; payoff now small.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

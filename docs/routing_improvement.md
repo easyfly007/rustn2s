@@ -156,12 +156,33 @@ reroute, channel routing, etc).
 
 ---
 
-## Phase C: Channel Routing (Future)
+## Phase C: through-body elimination — RESOLVED WITHOUT channel routing (2026-07-04)
 
-After Phase B is complete. Core idea:
-- Define horizontal/vertical channels between layout layers
-- Assign wire tracks within channels
-- Wires are ordered within channels without crossing
-- Requires placer cooperation to reserve channel space
+The original Phase C sketch (channels + track assignment, ~500 lines)
+targeted the through-body wires that survive A*. Diagnosis on case 36
+showed the ~100 survivors were NOT failed A* routes at all — they were
+30px **label stubs** whose default outward anchor landed inside a
+NEIGHBORING component (dense grids space footprints only 10px apart,
+and a label rect is 50px wide). Two bounded fixes replaced the planned
+machinery:
 
-This is a larger effort (~500+ lines) and will be planned separately after Phase B results are evaluated.
+1. **A\*-failure → label, not dirty wire**: when the obstacle grid has
+   no clean path for an edge, the edge is labeled instead of falling
+   back to an L-route through a body. An unroutable edge labeled is
+   standard schematic practice; a wire through a symbol is a defect.
+2. **Collision-aware label anchors**: `emit_labels` tries a candidate
+   ladder (default outward → diagonal into the inter-row gap → 2.5×
+   out → flipped), rejecting anchors whose 50×16 label rect intrudes
+   into any component body or overlaps an already-placed label.
+
+Case 36 through-body wires: 143 (start of day) → **36** (−75%); the
+survivors are stubs in the deepest congestion where every candidate
+fails. Suite means: quality 0.779 → 0.760 (a few analog cases pay one
+stub-crossing each — e.g. case 07 gains 1 crossing, −0.22 on its
+harsh crossing curve), txt 0.895 → 0.904. Readability over metric,
+as usual.
+
+Real channel routing (tracks, ordered wires, placer-reserved space)
+remains unimplemented and would be the tool for the LAST 36 stubs and
+for crossing-free trunk routing — genuinely future work now, with a
+much smaller payoff than this section originally assumed.
