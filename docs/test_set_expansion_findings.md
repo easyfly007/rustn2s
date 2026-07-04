@@ -483,13 +483,20 @@ two new crossings, layout still coherent), all 41 stay Tier 1 green.
   power_convention refinement: only devices whose horizontal symbol
   extents overlap (|dx| < 60) are compared — the old 100px window
   flagged pairs in neighboring columns.
-- **C2 — covered by case 41** (gpdk-style `g45n1svt`/`g45p1svt` names
-  + bulks on bias nets). Both inference rules fail as predicted and
-  M5 (a PMOS) renders with an NMOS symbol. No metric can catch a
-  wrong symbol; the case exists to keep the gap visible, and its
-  header documents it as KNOWN GAP. A real fix needs model-card
-  lookup or user hints (the `n2s:` directive namespace now exists for
-  exactly this kind of hint).
+- **C2 — covered by case 41, RESOLVED 2026-07-04** (gpdk-style
+  `g45n1svt`/`g45p1svt` names + bulks on bias nets; both inference
+  rules fail as predicted and M5 rendered with an NMOS symbol). Fix:
+  `* n2s: pmos_model <name>` / `* n2s: nmos_model <name>` comment
+  directives. The parser stamps every matching M/X device (top level
+  and subckt interiors) with an `n2s_polarity` parameter, and both
+  `infer_mos_type` and `infer_x_transistor_type` read the stamp
+  before any heuristic — the hint rides the device through every
+  pipeline stage with zero signature changes. Case 41 carries the
+  directives and now renders M5 as PMOS; deleting the two lines
+  reproduces the original failure. (Model-card lookup — parsing
+  `.model` cards for the type — remains a possible automatic path,
+  but real C2 netlists get types from .lib files n2s never sees, so
+  the directive is the honest general answer.)
 - **Stdcell cases 37–39** (sky130_fd_sc_hd dfxtp_1/fa_1/mux4_1) bring
   `VPWR`/`VGND`/`VPB`/`VNB` rails — initially not in the hardcoded
   power list, so these cells routed their rails as signal wires.

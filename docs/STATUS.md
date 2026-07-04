@@ -44,18 +44,15 @@ gone, though Tier 2 scores still jitter slightly).
   get full port semantics: DAG direction, layering, polarity sort.
 - Isolated blocks (sources OR lone devices) relocate beside their
   loads when a pure y-shift can't help (the P3 remainder).
-- Netlist comment directive `* n2s: power_net <name>` declares
-  rails the tool cannot discover (audit C1). The `n2s:` namespace
-  exists now — future hints (e.g. device polarity for C2) go there.
+- Netlist comment directives: `* n2s: power_net <name>` declares
+  rails the tool cannot discover (audit C1); `* n2s: pmos_model /
+  nmos_model <name>` declares polarity for foundry-opaque model
+  names (audit C2).
 
 ---
 
 ## Known gaps, deliberately left open
 
-- **C2 (case 41)**: an M card with a foundry-opaque model name
-  (`g45p1svt`) and bulk on a bias net renders PMOS-as-NMOS. No
-  metric can catch a wrong symbol. Real fix = model-card lookup or
-  an `n2s:` polarity hint; the test case keeps the gap visible.
 - **Scale (cases 29/36)**: root-caused and designed, not yet built —
   see `docs/scale_placement.md` (2026-07-04). Headline findings: the
   "hairball" is a 261-layer 1-wide ribbon plus a 130-block ALAP dump
@@ -110,12 +107,14 @@ post-PnR) found a Tier-1 symmetry bug (non-FET boxes paired as
 mirrors; exclusion generalized) and two performance cliffs (A* dense
 state ~50 MB/call; HAC all-pairs scan) — full 46-case sweep now 0.6 s.)
 
-1. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
-   directive (case 41 keeps the gap visible).
-2. **Physical-cell filter** — case 46's 700+ decap/fill/tap instances
+(C2 resolved 2026-07-04: `n2s: pmos_model / nmos_model` directives;
+case 41 now renders M5 correctly and documents how to reproduce the
+original failure. The audit's last open item is closed.)
+
+1. **Physical-cell filter** — case 46's 700+ decap/fill/tap instances
    (power pins only) dominate the canvas; post-PnR netlists want a
    `--skip-physical-cells` or automatic power-only-cell recognition.
-3. **True channel routing** — only if the last ~36 congestion stubs
+2. **True channel routing** — only if the last ~36 congestion stubs
    ever matter enough; payoff now small.
 
 ### Avoid (unchanged from the 2026-05-01 audit)

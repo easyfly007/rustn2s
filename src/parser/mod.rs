@@ -34,6 +34,12 @@ pub struct ParseResult {
     /// V-source-terminal rule cannot discover (audit item C1, e.g. an
     /// LDO's regulated output used as a supply).
     pub extra_power_nets: Vec<String>,
+    /// Model names declared PMOS/NMOS via `* n2s: pmos_model <name>...` /
+    /// `* n2s: nmos_model <name>...` — the C2 escape hatch for foundry
+    /// model names that match no keyword while the bulk sits on a bias
+    /// net (e.g. `g45p1svt`). Lowercased.
+    pub pmos_models: Vec<String>,
+    pub nmos_models: Vec<String>,
 }
 
 pub struct SpiceParser {
@@ -63,6 +69,8 @@ impl SpiceParser {
             parameters: HashMap::new(),
             warnings: Vec::new(),
             extra_power_nets: Vec::new(),
+            pmos_models: Vec::new(),
+            nmos_models: Vec::new(),
         };
 
         // Tool directives hidden in comments: `* n2s: power_net <n> [<n>...]`.
@@ -79,10 +87,23 @@ impl SpiceParser {
                 continue;
             };
             let mut toks = body.split_whitespace();
-            if toks.next() == Some("power_net") {
-                for name in toks {
-                    result.extra_power_nets.push(name.to_string());
+            match toks.next() {
+                Some("power_net") => {
+                    for name in toks {
+                        result.extra_power_nets.push(name.to_string());
+                    }
                 }
+                Some("pmos_model") => {
+                    for name in toks {
+                        result.pmos_models.push(name.to_string());
+                    }
+                }
+                Some("nmos_model") => {
+                    for name in toks {
+                        result.nmos_models.push(name.to_string());
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -210,6 +231,45 @@ impl SpiceParser {
         }
 
         result.warnings = self.warnings.clone();
+
+        // Apply polarity-hint directives: stamp matching devices with an
+        // `n2s_polarity` parameter so the hint travels with the device
+        // through every pipeline stage (infer_mos_type and
+        // infer_x_transistor_type read it first).
+        if !result.pmos_models.is_empty() || !result.nmos_models.is_empty() {
+            let pset: Vec<String> = result
+                .pmos_models
+                .iter()
+                .map(|m| m.to_lowercase())
+                .collect();
+            let nset: Vec<String> = result
+                .nmos_models
+                .iter()
+                .map(|m| m.to_lowercase())
+                .collect();
+            let stamp = |dev: &mut SpiceDevice| {
+                if !matches!(dev.device_type, 'M' | 'X') {
+                    return;
+                }
+                let model = dev.model_or_value.to_lowercase();
+                if pset.contains(&model) {
+                    dev.parameters
+                        .insert("n2s_polarity".to_string(), "p".to_string());
+                } else if nset.contains(&model) {
+                    dev.parameters
+                        .insert("n2s_polarity".to_string(), "n".to_string());
+                }
+            };
+            for dev in &mut result.devices {
+                stamp(dev);
+            }
+            for sub in &mut result.subcircuits {
+                for dev in &mut sub.devices {
+                    stamp(dev);
+                }
+            }
+        }
+
         result
     }
 
@@ -225,6 +285,8 @@ impl SpiceParser {
                     parameters: HashMap::new(),
                     warnings: vec![format!("Cannot open file: {}: {}", path, e)],
                     extra_power_nets: Vec::new(),
+                    pmos_models: Vec::new(),
+                    nmos_models: Vec::new(),
                 };
                 r.warnings = r.warnings.clone();
                 r
@@ -237,6 +299,13 @@ impl SpiceParser {
     // ========================================================================
 
     pub fn infer_mos_type(device: &SpiceDevice) -> &'static str {
+        // `* n2s: pmos_model/nmos_model` directive hint (stamped by parse):
+        // the C2 escape hatch, checked before every heuristic.
+        match device.parameters.get("n2s_polarity").map(|s| s.as_str()) {
+            Some("p") => return "pmos4",
+            Some("n") => return "nmos4",
+            _ => {}
+        }
         let model = device.model_or_value.to_lowercase();
         if model.contains("nch") || model.contains("nmos") || model == "n" {
             return "nmos4";
@@ -278,6 +347,11 @@ impl SpiceParser {
     pub fn infer_x_transistor_type(device: &SpiceDevice) -> Option<&'static str> {
         if device.device_type != 'X' || device.nodes.len() < 3 {
             return None;
+        }
+        match device.parameters.get("n2s_polarity").map(|s| s.as_str()) {
+            Some("p") => return Some("pmos4"),
+            Some("n") => return Some("nmos4"),
+            _ => {}
         }
         Self::fet_model_polarity(&device.model_or_value)
     }
@@ -549,6 +623,35 @@ pub fn pin_names_for_symbol(symbol_name: &str) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn polarity_directives_override_all_heuristics() {
+        // The C2 case: opaque model name, bulk on a bias net -- both
+        // heuristics fail, the directive decides.
+        let text = "* c2 probe\n\
+             * n2s: pmos_model g45p1svt\n\
+             * n2s: nmos_model g45n1svt\n\
+             M5 out d2 vdd pwell_bias g45p1svt W=32u L=0.4u\n\
+             M1 d1 inp cs nwell_bias g45n1svt W=8u L=0.4u\n";
+        let pr = SpiceParser::new().parse(text);
+        assert_eq!(pr.pmos_models, vec!["g45p1svt"]);
+        let m5 = pr.devices.iter().find(|d| d.instance_name == "M5").unwrap();
+        let m1 = pr.devices.iter().find(|d| d.instance_name == "M1").unwrap();
+        assert_eq!(SpiceParser::infer_mos_type(m5), "pmos4");
+        assert_eq!(SpiceParser::infer_mos_type(m1), "nmos4");
+    }
+
+    #[test]
+    fn polarity_directive_reaches_subckt_interiors_and_x_devices() {
+        let text = "* hinted X fet inside a subckt\n\
+             * n2s: pmos_model weird_p_cell\n\
+             .subckt blk in out vdd vss\n\
+             XP1 out in vdd vdd weird_p_cell W=1u\n\
+             .ends\n";
+        let pr = SpiceParser::new().parse(text);
+        let xp1 = &pr.subcircuits[0].devices[0];
+        assert_eq!(SpiceParser::infer_x_transistor_type(xp1), Some("pmos4"));
+    }
+
     use super::*;
 
     #[test]

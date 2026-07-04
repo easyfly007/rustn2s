@@ -11,12 +11,17 @@
 *               bulk=pwell_bias. Neither the model-name keyword check
 *               (nch/nmos/pch/pmos) nor the bulk-rail rescue can type
 *               these devices -- BOTH C2 conditions hold.
-* KNOWN GAP:    n2s defaults untypable MOSFETs to NMOS, so M5 renders with
-*               an NMOS symbol. No metric catches a wrong symbol; this case
-*               exists to keep the gap visible. If a real fix lands
-*               (e.g. model-card lookup or user hints), update this note.
+* RESOLVED:     2026-07-04 -- the `n2s: pmos_model / nmos_model` comment
+*               directives (below) declare polarity for foundry-opaque
+*               model names; the parser stamps matching devices and both
+*               inference paths read the stamp before any heuristic.
+*               Delete the two directive lines to reproduce the original
+*               C2 failure (M5 renders as NMOS, no metric notices).
 * Added:        2026-07-04  (batch 3: audit-gap probes)
 * ===============================
+
+* n2s: pmos_model g45p1svt
+* n2s: nmos_model g45n1svt
 
 VDD vdd 0 DC 1.8
 VIN inp 0 DC 0.9
