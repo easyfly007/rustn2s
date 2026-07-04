@@ -56,11 +56,16 @@ gone, though Tier 2 scores still jitter slightly).
   (`g45p1svt`) and bulk on a bias net renders PMOS-as-NMOS. No
   metric can catch a wrong symbol. Real fix = model-card lookup or
   an `n2s:` polarity hint; the test case keeps the gap visible.
-- **Scale (cases 29/36)**: 92 and 684 devices run fast (~0.15 s) but
-  the layouts are hairballs (`cross≈0`, `wire≈0.04`). The bottleneck
-  is HAC + Sugiyama at scale, not speed and not routing.
-  `docs/routing_improvement.md` covers only the routing half; the
-  placement half needs a design doc before any code.
+- **Scale (cases 29/36)**: root-caused and designed, not yet built —
+  see `docs/scale_placement.md` (2026-07-04). Headline findings: the
+  "hairball" is a 261-layer 1-wide ribbon plus a 130-block ALAP dump
+  layer; HAC has an early-exit bug (the max_cluster_size check
+  `break`s ALL clustering on the first capped merge — case 36 ends
+  with 678 singletons); pattern matchers don't accept X-FETs (the
+  M-card DFF gets 8 pattern blocks, the identical X-card DFF gets 18
+  singletons). Plan: Phase 0 = fix those two + re-measure (decision
+  gate), Phase 1 = CMOS gate extraction → collapse to boxes → the
+  existing Sugiyama at gate granularity.
 
 ## What to do next (in priority order)
 
@@ -73,11 +78,13 @@ tails are inputs, XPT sits beside its pair. See the findings doc.)
 five hardcoded rail lists; they are ecosystem-standard names, not
 tuning. Cases 37–39 improved across the board.)
 
-1. **Scale design doc** — placement strategy for 100+ devices
-   (grid/matrix placement for gate-array-like netlists?), then the
-   A* routing spec.
+1. **Scale Phase 0** (`docs/scale_placement.md`): fix the HAC
+   early-exit bug, extend pattern matchers to X-FETs, re-measure
+   29/36/37, then decide whether Phase 1 (gate extraction) is still
+   needed.
 2. **More external sources** — ngspice distribution examples,
-   Berkeley course circuits. Every new author is a new bug lottery.
+   Berkeley course circuits; also a prerequisite for scale Phase 1
+   (two test cases are not a design basis).
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 
