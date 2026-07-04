@@ -490,6 +490,20 @@ Case 40's findings: without the directive, `vreg` is a signal → the MLP/MLN in
 
 ---
 
+## Batch 5 (44–46): Two More Authors
+
+Added 2026-07-04. Fourth and fifth netlist authors: the **ngspice project's distribution examples** (fetched from the ngspice git repository) and the **xschem Verilog-import flow** (Stefan Schippers, shipped inside the sky130A PDK).
+
+| # | Circuit | Source | What it adds |
+|---|---------|--------|--------------|
+| 44 | 4-bit all-NAND adder | ngspice `examples/various/adder_mos.cir` | Deep multi-level LOCAL hierarchy (NAND→ONEBIT→TWOBIT→FOURBIT); documents that n2s renders the top box without recursive flattening; numeric net names |
+| 45 | Wien-bridge oscillator | ngspice `examples/Monte_Carlo/OpWien.sp` | Parser stress: behavioral `R='expr'`/`C='expr'`, `trrandom` sources, `$` comments, inline `.model`; first OSCILLATOR topology (global feedback, no driving input) |
+| 46 | SPM multiplier, post-PnR | sky130A `xschem_verilog_import/spm.spice` | **1188 stdcell instances — new scale record (1.7× case 36)**; first post-PnR netlist: 700+ physical-only decap/fill/tap cells |
+
+Case 46 paid out twice: (1) two same-model stdcell buffers scattered across the canvas were scored as a failed "mirror pair" — Tier 1 red; the symmetry exclusion generalized from synthetic gates to ALL non-FET box instances (metric + placer, `fet_model_polarity` shared helper). (2) Runtime was 42 s: A* allocated ~50 MB of dense state per call on the folded canvas, and unreachable goals flooded the whole grid — fixed with sparse state maps + an expansion budget; then HAC's all-pairs scan surfaced as the next bottleneck (~8 s) and was cut to net-sharing candidate pairs only. **The full 46-case sweep now runs in 0.6 s total.** Known enhancement recorded: physical-only filler cells (power pins only) dominate 2/3 of 46's canvas and deserve a filter.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:

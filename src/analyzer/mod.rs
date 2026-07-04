@@ -513,16 +513,37 @@ impl CircuitAnalyzer {
                 break;
             }
 
-            let active: Vec<usize> = cluster_members.keys().copied().collect();
+            // Candidate pairs: only clusters that actually share a net.
+            // Scanning ALL C^2 pairs (with an O(|A||B|) weight sum each,
+            // mostly summing to zero) made HAC the runtime bottleneck at
+            // scale — ~6 s of case 46's original 42 s. The adjacency map
+            // already knows which device pairs touch; project it onto
+            // clusters each iteration (O(E)) and score only those pairs.
+            let mut dev_cluster: HashMap<usize, usize> = HashMap::new();
+            for (&cid, members) in &cluster_members {
+                for &m in members {
+                    dev_cluster.insert(m, cid);
+                }
+            }
+            let mut candidate_pairs: HashSet<(usize, usize)> = HashSet::new();
+            for &(da, db) in adjacency.keys() {
+                let (Some(&ca), Some(&cb)) = (dev_cluster.get(&da), dev_cluster.get(&db)) else {
+                    continue;
+                };
+                if ca != cb {
+                    candidate_pairs.insert((ca.min(cb), ca.max(cb)));
+                }
+            }
+            let mut sorted_pairs: Vec<(usize, usize)> = candidate_pairs.into_iter().collect();
+            sorted_pairs.sort_unstable();
+
             let mut best_a = 0usize;
             let mut best_b = 0usize;
             let mut best_score = 0.0f64;
             let mut found = false;
 
-            for ci in 0..active.len() {
-                for cj in (ci + 1)..active.len() {
-                    let id_a = active[ci];
-                    let id_b = active[cj];
+            {
+                for &(id_a, id_b) in &sorted_pairs {
                     let members_a = &cluster_members[&id_a];
                     let members_b = &cluster_members[&id_b];
 

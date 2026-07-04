@@ -104,11 +104,19 @@ routes. A*-failure now labels instead of drawing dirty wires, and
 label anchors are collision-aware. 36's through-body wires: 143 → 36.
 See routing_improvement.md.)
 
-1. **More external sources** — ngspice examples, Berkeley circuits.
-2. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
+(Batch 5 landed 2026-07-04: cases 44–46 from two new authors —
+ngspice distribution + xschem Verilog-import. Case 46 (1188 instances,
+post-PnR) found a Tier-1 symmetry bug (non-FET boxes paired as
+mirrors; exclusion generalized) and two performance cliffs (A* dense
+state ~50 MB/call; HAC all-pairs scan) — full 46-case sweep now 0.6 s.)
+
+1. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
    directive (case 41 keeps the gap visible).
+2. **Physical-cell filter** — case 46's 700+ decap/fill/tap instances
+   (power pins only) dominate the canvas; post-PnR netlists want a
+   `--skip-physical-cells` or automatic power-only-cell recognition.
 3. **True channel routing** — only if the last ~36 congestion stubs
-   and trunk crossings ever matter enough; payoff now small.
+   ever matter enough; payoff now small.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

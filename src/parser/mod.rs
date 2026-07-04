@@ -279,7 +279,14 @@ impl SpiceParser {
         if device.device_type != 'X' || device.nodes.len() < 3 {
             return None;
         }
-        let model = device.model_or_value.to_lowercase();
+        Self::fet_model_polarity(&device.model_or_value)
+    }
+
+    /// Name-only version of the X-FET polarity check, for callers that
+    /// have a model/symbol name but no device (e.g. the symmetry metric
+    /// deciding whether a `subckt_*` box is a transistor or a cell).
+    pub fn fet_model_polarity(model: &str) -> Option<&'static str> {
+        let model = model.to_lowercase();
         let seg = model.rsplit("__").next().unwrap_or(&model);
         if seg.contains("nfet") || seg.contains("nmos") || seg.starts_with("nch") {
             Some("nmos4")

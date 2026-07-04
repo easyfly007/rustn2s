@@ -29,12 +29,17 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
         if matches!(comp.symbol_name.as_str(), "vsource" | "isource") {
             continue;
         }
-        // Synthetic gate boxes (scale Phase 1): two NAND2s sharing a model
-        // are unrelated logic, not an analog mirror pair — same reasoning
-        // as the V/I exclusion above (case 36: its only two NOR2 gates
-        // landed in different fold bands and scored 0.0 as a "pair").
-        if comp.symbol_name.starts_with("subckt_gate__") {
-            continue;
+        // Box components that are not FET primitives — synthetic gates,
+        // library cells, hierarchical blocks — are unrelated logic, not
+        // analog mirror pairs; same reasoning as the V/I exclusion above.
+        // (Case 36: its only two NOR2 gates scored 0.0 as a "pair" across
+        // fold bands; case 46: two same-model stdcell buffers scattered
+        // across a 1188-instance canvas failed Tier 1.) X-FET boxes
+        // (sky130_fd_pr__*fet) stay in — analog mirrors are real there.
+        if let Some(model) = comp.symbol_name.strip_prefix("subckt_") {
+            if crate::parser::SpiceParser::fet_model_polarity(model).is_none() {
+                continue;
+            }
         }
         let mut key_parts = vec![comp.symbol_name.clone()];
         // Sort properties for stable key

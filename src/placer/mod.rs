@@ -387,10 +387,12 @@ impl SchematicPlacer {
             if matches!(dev.device_type, 'V' | 'I') {
                 continue;
             }
-            // Synthetic gate boxes are not analog mirror pairs; aligning
-            // two same-kind gates across a digital design is meaningless
-            // churn (mirrors the symmetry metric's exclusion).
-            if dev.model_or_value.starts_with("gate__") {
+            // X-instance boxes that are not FET primitives (synthetic
+            // gates, library cells, hierarchical blocks) are not analog
+            // mirror pairs; aligning two same-model cells across a digital
+            // design is meaningless churn (mirrors the symmetry metric's
+            // exclusion).
+            if dev.device_type == 'X' && SpiceParser::infer_x_transistor_type(dev).is_none() {
                 continue;
             }
             let key = Self::device_match_key(dev);

@@ -326,16 +326,27 @@ pub fn find_path(
         return Some(vec![from, to]);
     }
 
-    let n = grid.cols * grid.rows;
-    let state_count = n * 5;
     let state_idx = |c: usize, r: usize, d: Dir| -> usize { (r * grid.cols + c) * 5 + dir_idx(d) };
 
-    let mut g_cost = vec![f64::INFINITY; state_count];
-    let mut parent: Vec<Option<(u32, u32, u8)>> = vec![None; state_count];
+    // Sparse state maps: a dense Vec over cols*rows*5 states allocates
+    // ~50 MB PER CALL on a folded scale canvas (case 46: 1188 cells,
+    // >1M grid cells) — the allocation churn alone dominated runtime.
+    // Local searches touch a few thousand states at most.
+    let mut g_cost: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+    let mut parent: std::collections::HashMap<usize, (u32, u32, u8)> =
+        std::collections::HashMap::new();
     let mut heap = BinaryHeap::new();
 
+    // Expansion budget: without one, an UNREACHABLE goal floods the whole
+    // grid before giving up — hundreds of such searches cost tens of
+    // seconds at scale. The budget scales with problem size; on exhaustion
+    // we return None and the caller labels the edge instead.
+    let manhattan_cells = ((sc as i32 - gc as i32).abs() + (sr as i32 - gr as i32).abs()) as usize;
+    let node_budget = 4_000 + manhattan_cells * 100;
+    let mut popped = 0usize;
+
     let h0 = ((sc as i32 - gc as i32).abs() + (sr as i32 - gr as i32).abs()) as f64;
-    g_cost[state_idx(sc, sr, Dir::None)] = 0.0;
+    g_cost.insert(state_idx(sc, sr, Dir::None), 0.0);
     heap.push(Node {
         col: sc,
         row: sr,
@@ -351,6 +362,10 @@ pub fn find_path(
     ];
 
     while let Some(node) = heap.pop() {
+        popped += 1;
+        if popped > node_budget {
+            return None;
+        }
         if node.col == gc && node.row == gr {
             // Reconstruct
             let mut path: Vec<Point> = Vec::new();
@@ -360,7 +375,7 @@ pub fn find_path(
             loop {
                 path.push(grid.cell_to_world(cur_c as i32, cur_r as i32));
                 let key = state_idx(cur_c, cur_r, cur_d);
-                match parent[key] {
+                match parent.get(&key).copied() {
                     Some((pc, pr, pd)) => {
                         cur_c = pc as usize;
                         cur_r = pr as usize;
@@ -384,7 +399,10 @@ pub fn find_path(
             return Some(simplify_path(&path));
         }
 
-        let cur_g = g_cost[state_idx(node.col, node.row, node.dir)];
+        let cur_g = g_cost
+            .get(&state_idx(node.col, node.row, node.dir))
+            .copied()
+            .unwrap_or(f64::INFINITY);
         // Stale heap entry — a better g_cost was recorded after this was pushed.
         if cur_g + 1e-9 < node.f - manhattan(node.col, node.row, gc, gr) {
             continue;
@@ -422,9 +440,12 @@ pub fn find_path(
             let new_g = cur_g + step;
 
             let key = state_idx(nc, nr, d);
-            if new_g + 1e-9 < g_cost[key] {
-                g_cost[key] = new_g;
-                parent[key] = Some((node.col as u32, node.row as u32, dir_idx(node.dir) as u8));
+            if new_g + 1e-9 < g_cost.get(&key).copied().unwrap_or(f64::INFINITY) {
+                g_cost.insert(key, new_g);
+                parent.insert(
+                    key,
+                    (node.col as u32, node.row as u32, dir_idx(node.dir) as u8),
+                );
                 let h = manhattan(nc, nr, gc, gr);
                 heap.push(Node {
                     col: nc,
