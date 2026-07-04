@@ -71,6 +71,27 @@ impl SchematicPlacer {
         }
     }
 
+    /// Polarity class of a block for PMOS-top / NMOS-bottom ordering:
+    /// 0 = PMOS-only (top), 1 = mixed/neutral, 2 = NMOS-only (bottom).
+    fn block_polarity_class(block: &FunctionalBlock, devices: &[SpiceDevice]) -> u8 {
+        let mut has_pmos = false;
+        let mut has_nmos = false;
+        for &di in &block.device_indices {
+            if di < devices.len() {
+                match Self::polarity_symbol(&devices[di]).as_str() {
+                    "pmos4" | "pnp" => has_pmos = true,
+                    "nmos4" | "npn" => has_nmos = true,
+                    _ => {}
+                }
+            }
+        }
+        match (has_pmos, has_nmos) {
+            (true, false) => 0,
+            (false, true) => 2,
+            _ => 1,
+        }
+    }
+
     /// Symbol name used for polarity (PMOS-top / NMOS-bottom) sorting.
     /// X instances of PDK FET primitives resolve to nmos4/pmos4 via the
     /// model name so they sort like M devices; everything else keeps its
@@ -168,39 +189,83 @@ impl SchematicPlacer {
         let mut max_x = f64::MIN;
         let mut max_y = f64::MIN;
 
-        // Compute column widths for multi-column layers so subsequent layers
-        // are offset correctly.
-        let mut layer_x_start: Vec<f64> = Vec::new();
-        let mut x_cursor = 0.0;
+        // Per-layer strip footprint: total width of the layer's grid and
+        // the tallest of its columns.
+        let mut strip_w: Vec<f64> = Vec::new();
+        let mut strip_h: Vec<f64> = Vec::new();
         for layer in &layers {
-            layer_x_start.push(x_cursor);
-            let cols = Self::compute_grid_columns(layer, &block_layouts, opts);
-            // Advance x_cursor by the total width of this layer's grid
-            let mut max_col_width = 0.0f64;
+            let cols = Self::compute_grid_columns(layer, &block_layouts, opts, blocks, devices);
+            let mut w = 0.0f64;
+            let mut h = 0.0f64;
             for col_blocks in &cols {
                 let col_w = col_blocks
                     .iter()
-                    .map(|&&bi| block_layouts[bi].width)
+                    .map(|&bi| block_layouts[bi].width)
                     .fold(0.0f64, f64::max);
-                max_col_width += col_w + opts.layer_spacing;
+                w += col_w + opts.layer_spacing;
+                let col_h: f64 = col_blocks
+                    .iter()
+                    .map(|&bi| block_layouts[bi].height + opts.inter_block_spacing)
+                    .sum();
+                h = h.max(col_h);
             }
-            // Use at least one layer_spacing worth of width
-            x_cursor += max_col_width.max(opts.layer_spacing);
+            strip_w.push(w.max(opts.layer_spacing));
+            strip_h.push(h);
+        }
+
+        // Scale Phase 2 — depth folding (docs/scale_placement.md). A deep
+        // design laid out as one horizontal strip per layer becomes an
+        // unreadable ribbon (case 36: 67 layers, 28k px wide). When the
+        // design is deep enough, fold the layer sequence into horizontal
+        // bands sized so the canvas comes out roughly square: with total
+        // strip width S and mean strip height H, b = sqrt(S/H) bands of
+        // width ~S/b give width ≈ height. Signal flow reads left→right
+        // within a band, bands top→down (newspaper order). Shallow designs
+        // (every current case except 36) are untouched.
+        const FOLD_MIN_LAYERS: usize = 12;
+        let total_w: f64 = strip_w.iter().sum();
+        let mut layer_x_start: Vec<f64> = Vec::with_capacity(layers.len());
+        let mut layer_y_start: Vec<f64> = Vec::with_capacity(layers.len());
+        if layers.len() >= FOLD_MIN_LAYERS {
+            let h_bar = (strip_h.iter().sum::<f64>() / strip_h.len() as f64).max(1.0);
+            let bands = (total_w / h_bar).sqrt().round().max(1.0);
+            let band_target_w = total_w / bands;
+            let mut x_cursor = 0.0;
+            let mut band_y = 0.0;
+            let mut band_h = 0.0f64;
+            for l in 0..layers.len() {
+                if x_cursor > 0.0 && x_cursor + strip_w[l] > band_target_w {
+                    band_y += band_h + opts.layer_spacing;
+                    x_cursor = 0.0;
+                    band_h = 0.0;
+                }
+                layer_x_start.push(x_cursor);
+                layer_y_start.push(band_y);
+                x_cursor += strip_w[l];
+                band_h = band_h.max(strip_h[l]);
+            }
+        } else {
+            let mut x_cursor = 0.0;
+            for l in 0..layers.len() {
+                layer_x_start.push(x_cursor);
+                layer_y_start.push(0.0);
+                x_cursor += strip_w[l];
+            }
         }
 
         for (l, layer) in layers.iter().enumerate() {
             let base_x = layer_x_start[l];
-            let cols = Self::compute_grid_columns(layer, &block_layouts, opts);
+            let cols = Self::compute_grid_columns(layer, &block_layouts, opts, blocks, devices);
 
             let mut col_x = base_x;
             for col_blocks in &cols {
-                let mut y_cursor = 0.0;
+                let mut y_cursor = layer_y_start[l];
                 let col_width = col_blocks
                     .iter()
-                    .map(|&&bi| block_layouts[bi].width)
+                    .map(|&bi| block_layouts[bi].width)
                     .fold(0.0f64, f64::max);
 
-                for &&block_idx in col_blocks {
+                for &block_idx in col_blocks {
                     let layout = &block_layouts[block_idx];
                     let anchor = Point::new(col_x, y_cursor);
 
@@ -320,6 +385,12 @@ impl SchematicPlacer {
         let mut match_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (di, dev) in devices.iter().enumerate() {
             if matches!(dev.device_type, 'V' | 'I') {
+                continue;
+            }
+            // Synthetic gate boxes are not analog mirror pairs; aligning
+            // two same-kind gates across a digital design is meaningless
+            // churn (mirrors the symmetry metric's exclusion).
+            if dev.model_or_value.starts_with("gate__") {
                 continue;
             }
             let key = Self::device_match_key(dev);
@@ -784,34 +855,12 @@ impl SchematicPlacer {
         blocks: &[FunctionalBlock],
         devices: &[SpiceDevice],
     ) {
-        // Classify each block's polarity
-        // 0 = PMOS (top), 1 = mixed/neutral (middle), 2 = NMOS (bottom)
-        let classify_block = |block: &FunctionalBlock| -> u8 {
-            let mut has_pmos = false;
-            let mut has_nmos = false;
-            for &di in &block.device_indices {
-                if di < devices.len() {
-                    let sym = Self::polarity_symbol(&devices[di]);
-                    match sym.as_str() {
-                        "pmos4" | "pnp" => has_pmos = true,
-                        "nmos4" | "npn" => has_nmos = true,
-                        _ => {}
-                    }
-                }
-            }
-            match (has_pmos, has_nmos) {
-                (true, false) => 0, // PMOS → top
-                (false, true) => 2, // NMOS → bottom
-                _ => 1,             // mixed or passive → middle
-            }
-        };
-
         for layer in layers.iter_mut() {
             if layer.len() <= 1 {
                 continue;
             }
             // Stable sort preserves crossing-minimized order within same polarity
-            layer.sort_by_key(|&bi| classify_block(&blocks[bi]));
+            layer.sort_by_key(|&bi| Self::block_polarity_class(&blocks[bi], devices));
         }
     }
 
@@ -823,15 +872,55 @@ impl SchematicPlacer {
     /// achieve a roughly square aspect ratio instead of an extreme vertical strip.
     ///
     /// Returns a vector of columns, each column being a slice of block indices.
-    fn compute_grid_columns<'a>(
-        layer: &'a [usize],
+    fn compute_grid_columns(
+        layer: &[usize],
         block_layouts: &[InternalLayout],
         opts: &PlacerOptions,
-    ) -> Vec<Vec<&'a usize>> {
+        blocks: &[FunctionalBlock],
+        devices: &[SpiceDevice],
+    ) -> Vec<Vec<usize>> {
         if layer.len() <= 2 {
             // 1-2 blocks: single column is fine
-            return vec![layer.iter().collect()];
+            return vec![layer.to_vec()];
         }
+
+        // Scale Phase 2 — bus alignment. In a WIDE layer (grid regime),
+        // stable-sort blocks by a kind signature before the balanced
+        // greedy distribution: identical blocks then round-robin across
+        // the grid columns at matching row positions, so repeated cells
+        // (bit slices, gate banks) line up in visible rows instead of
+        // being scattered by barycenter noise. Stable sort preserves the
+        // crossing-minimized order within each kind group; small layers
+        // keep their pure barycenter order.
+        let sorted_layer: Vec<usize>;
+        let layer: &[usize] = if layer.len() >= 6 && !devices.is_empty() {
+            let kind_key = |bi: usize| -> String {
+                let mut parts: Vec<String> = blocks[bi]
+                    .device_indices
+                    .iter()
+                    .filter(|&&di| di < devices.len())
+                    .map(|&di| {
+                        format!("{}:{}", devices[di].device_type, devices[di].model_or_value)
+                    })
+                    .collect();
+                parts.sort_unstable();
+                parts.join(",")
+            };
+            let mut v: Vec<usize> = layer.to_vec();
+            // Composite key: polarity class FIRST — the kind grouping must
+            // not undo sort_blocks_by_polarity's PMOS-top ordering (doing
+            // so regressed cases 06/17/20/32 on the first attempt).
+            v.sort_by_key(|&bi| {
+                (
+                    Self::block_polarity_class(&blocks[bi], devices),
+                    kind_key(bi),
+                )
+            });
+            sorted_layer = v;
+            &sorted_layer
+        } else {
+            layer
+        };
 
         // Compute total height if all blocks were in one column
         let total_height: f64 = layer
@@ -853,12 +942,12 @@ impl SchematicPlacer {
         let num_cols = (ideal_cols.ceil() as usize).max(1).min(layer.len());
 
         if num_cols <= 1 {
-            return vec![layer.iter().collect()];
+            return vec![layer.to_vec()];
         }
 
         // Distribute blocks across columns, balancing total height per column.
         // Greedy: assign each block to the column with the smallest current height.
-        let mut columns: Vec<Vec<&usize>> = (0..num_cols).map(|_| Vec::new()).collect();
+        let mut columns: Vec<Vec<usize>> = (0..num_cols).map(|_| Vec::new()).collect();
         let mut col_heights: Vec<f64> = vec![0.0; num_cols];
 
         for bi in layer {
@@ -869,7 +958,7 @@ impl SchematicPlacer {
                 .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .map(|(i, _)| i)
                 .unwrap_or(0);
-            columns[min_col].push(bi);
+            columns[min_col].push(*bi);
             col_heights[min_col] += block_layouts[*bi].height + opts.inter_block_spacing;
         }
 

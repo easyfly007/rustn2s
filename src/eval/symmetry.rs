@@ -29,6 +29,13 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
         if matches!(comp.symbol_name.as_str(), "vsource" | "isource") {
             continue;
         }
+        // Synthetic gate boxes (scale Phase 1): two NAND2s sharing a model
+        // are unrelated logic, not an analog mirror pair — same reasoning
+        // as the V/I exclusion above (case 36: its only two NOR2 gates
+        // landed in different fold bands and scored 0.0 as a "pair").
+        if comp.symbol_name.starts_with("subckt_gate__") {
+            continue;
+        }
         let mut key_parts = vec![comp.symbol_name.clone()];
         // Sort properties for stable key
         let mut props: Vec<(&str, &str)> = comp

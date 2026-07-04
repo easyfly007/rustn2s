@@ -89,12 +89,13 @@ truth — and collapses them to real-direction boxes in the scale
 regime. Case 36: 173 gates, layers 131→67, canvas halved. Batch 4
 added OpenRAM cases 42/43 as the prerequisite.)
 
-1. **Scale Phase 2** (`docs/scale_placement.md`): depth folding for
-   delay chains (36's remaining 67 layers are partly REAL
-   inverter-string depth) + bus alignment for identical-gate groups.
-2. **Scale Phase 3 / routing**: A* per routing_improvement.md;
-   cross=0.00 at scale is now the routing half's problem.
-3. **More external sources** — ngspice examples, Berkeley circuits.
+(Scale Phase 2 landed 2026-07-04: depth folding — 36's ribbon became
+a 2 930 x 10 570 banded page, shape 0.10 → 0.81 — plus kind-sorted
+grid distribution for bus alignment, polarity class as primary key.)
+
+1. **Scale Phase 3 / routing**: A* per routing_improvement.md;
+   cross=0.00 at scale is now purely the routing half's problem.
+2. **More external sources** — ngspice examples, Berkeley circuits.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

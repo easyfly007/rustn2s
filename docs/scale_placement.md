@@ -208,18 +208,34 @@ device count > threshold (e.g. 60) AND gate coverage > ~70%. Analog
 circuits fail the coverage test and keep the current path unchanged —
 cases 01–28 must not change output at all (regression-gated).
 
-### Phase 2 — width control at the gate level (RC3's residue)
+### Phase 2 — depth folding + bus alignment — **LANDED 2026-07-04**
 
-With gates as nodes, depth ~20 is fine but some layers will be wide
-(bit-slices: 8 identical DFFs in one layer). Two additions:
+Two additions, both regime-gated so every case except the deep/wide
+ones is untouched:
 
-- **Row balancing**: split layers wider than `W ≈ sqrt(total)` into
-  sub-rows (already exists as `compute_grid_columns`; verify it
-  engages sanely at gate granularity).
-- **Bus alignment**: generalize `align_matched_pairs` from pairs to
-  N-member groups of identical gates (same match key) — bit-slice
-  columns should align vertically. (The pair machinery, sorted keys +
-  fixpoint + rect collision sim, extends naturally.)
+- **Depth folding**: when a design has >= 12 layers, the layer
+  sequence folds into horizontal bands sized b = sqrt(S/H) so the
+  canvas comes out roughly square (newspaper reading order: left to
+  right within a band, bands top to bottom). Case 36: 27 930 x 1 980
+  ribbon → 2 930 x 10 570 banded page; shape 0.10 → 0.81; overall
+  0.584 → 0.713. Only case 36 trips the 12-layer threshold today.
+- **Bus alignment**: wide layers (>= 6 blocks, the grid regime)
+  stable-sort blocks by (polarity class, kind signature) before the
+  balanced greedy column distribution — identical cells round-robin
+  into matching row positions, so repeated gates line up instead of
+  scattering by barycenter noise. First attempt sorted by kind alone
+  and broke PMOS-top ordering on four analog cases (06/17/20/32) —
+  the polarity class must stay the primary key.
+- Symmetry machinery exclusion: synthetic gate boxes opted out of
+  matched-pair scoring/alignment (two NAND2s sharing a model are
+  unrelated logic, not a mirror pair — same reasoning as the V/I
+  exclusion from Bug 2). Case 36's only two NOR2s had scored 0.0 as
+  a "pair" across fold bands.
+- Suite effect: net positive (41 +0.21, 34 +0.11, 16 +0.11, 31 +0.06,
+  37 +0.05); no case below its pre-Phase-2 Tier 1 state.
+
+Remaining for case 36: cross = 0.00 — now squarely the routing
+half's problem (Phase 3 / routing_improvement.md).
 
 ### Phase 3 — routing at scale
 
