@@ -119,7 +119,7 @@ appears, find the test data that triggers it.
 cargo build --release
 cargo test                    # 173 tests, all green expected
 
-# Full sweep with the two-tier profile (~0.6 s for all 46)
+# Full sweep with the two-tier profile (~2 s for all 49)
 mkdir -p output
 for f in tests/examples/*.sp; do
   name=$(basename "$f" .sp)
