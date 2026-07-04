@@ -60,12 +60,6 @@ gone, though Tier 2 scores still jitter slightly).
   are not in the hardcoded power list. The cells pass Tier 1 anyway;
   adding the four names to the builtin list vs. requiring the
   directive is an open call.
-- **Source-pin nets are neither block inputs nor outputs**, so a
-  tail/header device's drain net is "consumed" by nobody and ALAP
-  sinks the device to the last layer (case 34's XPT sits top-right
-  instead of beside the pair it feeds). Fixing this means classifying
-  pair-source nets as inputs — blast radius covers every M circuit,
-  so it needs its own careful pass.
 - **Scale (cases 29/36)**: 92 and 684 devices run fast (~0.15 s) but
   the layouts are hairballs (`cross≈0`, `wire≈0.04`). The bottleneck
   is HAC + Sugiyama at scale, not speed and not routing.
@@ -74,16 +68,16 @@ gone, though Tier 2 scores still jitter slightly).
 
 ## What to do next (in priority order)
 
-1. **Source-pin input classification** (the XPT gap) — the last
-   structural placement gap with a known, bounded cause. Run the
-   full 41-case sweep before/after; expect layer assignments to
-   shift on many circuits.
-2. **Decide the SkyWater rail question** (4-line change or a
+(Source-pin input classification — the former #1 — landed on
+2026-07-04: sources/emitters are block inputs, external diff-pair
+tails are inputs, XPT sits beside its pair. See the findings doc.)
+
+1. **Decide the SkyWater rail question** (4-line change or a
    documented "use the directive" stance).
-3. **Scale design doc** — placement strategy for 100+ devices
+2. **Scale design doc** — placement strategy for 100+ devices
    (grid/matrix placement for gate-array-like netlists?), then the
    A* routing spec.
-4. **More external sources** — ngspice distribution examples,
+3. **More external sources** — ngspice distribution examples,
    Berkeley course circuits. Every new author is a new bug lottery.
 
 ### Avoid (unchanged from the 2026-05-01 audit)

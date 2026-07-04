@@ -459,9 +459,16 @@ Two placer determinism fixes shaken out by the layout change:
 nor output in block I/O classification, so nothing "consumes" a tail
 or header device's drain net at the pair's source pins — under ALAP
 those devices sink to the LAST layer (case 34's XPT now sits top-right
-instead of beside XP1/XP2). Classifying pair-source nets as inputs
-would chain stacks in the DAG; blast radius covers all M circuits, so
-it needs its own pass of scrutiny.
+instead of beside XP1/XP2). **FIXED (2026-07-04, follow-up commit)**:
+source/emitter nets are now classified as block inputs in
+single-device and cluster I/O inference, and a diff-pair block whose
+tail lives OUTSIDE the block declares the tail net as an input
+(previously it was mislabeled internal even with an external tail).
+Case 34's XPT now sits directly left of the XP2/XP1 pair it feeds —
+clock inverter → tail header → input pair reads left to right.
+Full-sweep effect: net positive (17: 0.454→0.561, 24: 0.663→0.878,
+30: 0.509→0.535, 34: 0.452→0.540), one regression (04: 0.941→0.727,
+two new crossings, layout still coherent), all 41 stay Tier 1 green.
 
 ## Batch 3 closes the C1/C2 loop (2026-07-04)
 

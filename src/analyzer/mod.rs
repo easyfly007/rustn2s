@@ -204,6 +204,7 @@ impl CircuitAnalyzer {
                         // positive terminal on tail (e.g. `I1 tail 0 1m` in a
                         // BJT diff pair).
                         let tail_net = &ma.nodes[2];
+                        let mut tail_absorbed = false;
                         for (k, dev) in devices.iter().enumerate() {
                             if assigned.contains(&k) {
                                 continue;
@@ -218,8 +219,19 @@ impl CircuitAnalyzer {
                                     block.all_nets.insert(n.clone());
                                 }
                                 assigned.insert(k);
+                                tail_absorbed = true;
                                 break;
                             }
+                        }
+
+                        // If the tail device lives OUTSIDE this block, the
+                        // tail net is a real input: the external tail's
+                        // drain output must have a consumer, or the DAG
+                        // never connects it and ALAP sinks the tail to the
+                        // last layer (the case-34 XPT problem).
+                        if !tail_absorbed {
+                            block.internal_nets.remove(tail_net);
+                            block.input_nets.push(tail_net.clone());
                         }
 
                         blocks.push(block);
@@ -574,22 +586,30 @@ impl CircuitAnalyzer {
         // a lone sky130_fd_pr__*fet block has no I/O nets, no DAG edges,
         // and floats in a column of its own (case 34's XPT tail header).
         let is_x_fet = SpiceParser::infer_x_transistor_type(dev).is_some();
-        match dev.device_type {
-            'M' | 'Q' if dev.nodes.len() >= 3 => {
-                if !power_nets.contains(&dev.nodes[1].to_lowercase()) {
-                    block.input_nets.push(dev.nodes[1].clone());
-                }
-                if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
-                    block.output_nets.push(dev.nodes[0].clone());
+        // Transistor I/O: gate/base is an input, drain/collector an output,
+        // and the source/emitter is ALSO an input — a series stack or a
+        // tail-fed pair consumes current at its source pin, and without
+        // this edge the driver's drain net has no consumer in the DAG.
+        let transistor_io = |block: &mut FunctionalBlock| {
+            if !power_nets.contains(&dev.nodes[1].to_lowercase()) {
+                block.input_nets.push(dev.nodes[1].clone());
+            }
+            if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
+                block.output_nets.push(dev.nodes[0].clone());
+            }
+            if dev.nodes.len() >= 3 {
+                let src = &dev.nodes[2];
+                if !power_nets.contains(&src.to_lowercase()) && !block.input_nets.contains(src) {
+                    block.input_nets.push(src.clone());
                 }
             }
+        };
+        match dev.device_type {
+            'M' | 'Q' if dev.nodes.len() >= 3 => {
+                transistor_io(block);
+            }
             'X' if is_x_fet => {
-                if !power_nets.contains(&dev.nodes[1].to_lowercase()) {
-                    block.input_nets.push(dev.nodes[1].clone());
-                }
-                if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
-                    block.output_nets.push(dev.nodes[0].clone());
-                }
+                transistor_io(block);
             }
             'E' | 'G' | 'H' | 'F' if dev.nodes.len() >= 4 => {
                 block.input_nets = vec![dev.nodes[2].clone(), dev.nodes[3].clone()];
@@ -674,6 +694,13 @@ impl CircuitAnalyzer {
                     }
                     if dev.nodes[0] == *net {
                         is_output = true;
+                    }
+                    // Source/emitter consumes current from an external
+                    // driver (tail, header, or the lower device of a series
+                    // stack) — classify it as an input so that driver's
+                    // drain output has a consumer in the DAG.
+                    if dev.nodes.len() >= 3 && dev.nodes[2] == *net {
+                        is_input = true;
                     }
                 }
             }
