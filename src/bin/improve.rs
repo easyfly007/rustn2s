@@ -178,6 +178,7 @@ fn build_opts(params: &TunableParams, cli: &Cli) -> ConvertOptions {
             ..Default::default()
         },
         hierarchical: false,
+        keep_physical_cells: false,
     }
 }
 

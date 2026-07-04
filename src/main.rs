@@ -47,6 +47,11 @@ struct Cli {
     #[arg(long)]
     no_grid: bool,
 
+    /// Keep physical-only cells (post-PnR decap/fill/tap instances whose
+    /// every pin is a power net); filtered out by default
+    #[arg(long)]
+    keep_physical_cells: bool,
+
     /// Render subcircuit instances as boxes with ports (hierarchical view)
     #[arg(long)]
     hierarchical: bool,
@@ -95,6 +100,7 @@ fn main() {
             ..Default::default()
         },
         hierarchical: cli.hierarchical,
+        keep_physical_cells: cli.keep_physical_cells,
     };
 
     let spice_text = std::fs::read_to_string(&cli.input).unwrap_or_else(|e| {

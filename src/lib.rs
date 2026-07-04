@@ -22,6 +22,11 @@ pub struct ConvertOptions {
     /// When true, render subcircuit instances as boxes with ports
     /// instead of expanding them to individual devices.
     pub hierarchical: bool,
+    /// Keep physical-only cells (post-PnR decap/fill/tap instances whose
+    /// every pin is a power net). Filtered by default: they carry no
+    /// signal connectivity and drown the logic (case 46: 700+ fillers
+    /// covered two-thirds of the canvas).
+    pub keep_physical_cells: bool,
 }
 
 /// Result of the full conversion pipeline.
@@ -90,6 +95,45 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
     for net in &pr.extra_power_nets {
         power_nets.insert(net.to_lowercase());
     }
+
+    // Physical-only cells: X instances whose EVERY node is a power net
+    // (post-PnR decap / fill / well-tap fillers) carry no signal
+    // connectivity and therefore no schematic information — case 46's
+    // 700+ fillers covered two-thirds of the canvas. Filtered by default;
+    // --keep-physical-cells opts out. Deliberately X-only: an M/C device
+    // wired rail-to-rail (a bypass cap, a decap FET drawn on purpose in
+    // an analog schematic) is real content and stays.
+    let physical_filtered: Option<Vec<SpiceDevice>> = if opts.keep_physical_cells {
+        None
+    } else {
+        let is_physical = |d: &SpiceDevice| {
+            d.device_type == 'X'
+                && !d.nodes.is_empty()
+                && d.nodes
+                    .iter()
+                    .all(|n| power_nets.contains(&n.to_lowercase()))
+        };
+        if devices.iter().any(is_physical) {
+            let kept: Vec<SpiceDevice> = devices
+                .iter()
+                .filter(|d| !is_physical(d))
+                .cloned()
+                .collect();
+            // Degenerate all-filler netlist: keep the original rather than
+            // rendering nothing.
+            if kept.is_empty() {
+                None
+            } else {
+                Some(kept)
+            }
+        } else {
+            None
+        }
+    };
+    let devices: &[SpiceDevice] = match &physical_filtered {
+        Some(v) => v,
+        None => devices,
+    };
 
     // Scale Phase 1 (docs/scale_placement.md): on large, gate-dominated
     // netlists, collapse recognized CMOS gates into synthetic box devices

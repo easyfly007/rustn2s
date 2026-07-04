@@ -111,11 +111,20 @@ state ~50 MB/call; HAC all-pairs scan) — full 46-case sweep now 0.6 s.)
 case 41 now renders M5 correctly and documents how to reproduce the
 original failure. The audit's last open item is closed.)
 
-1. **Physical-cell filter** — case 46's 700+ decap/fill/tap instances
-   (power pins only) dominate the canvas; post-PnR netlists want a
-   `--skip-physical-cells` or automatic power-only-cell recognition.
-2. **True channel routing** — only if the last ~36 congestion stubs
+(Physical-cell filter landed 2026-07-04: X instances whose every pin
+is a power net are dropped by default — a structural, foundry-neutral
+rule, `--keep-physical-cells` opts out. Case 46: 1188 → 390
+components, canvas area ÷4.8, only real logic remains. Its quality
+number DROPPED 0.48 → 0.33 — the filler boxes had been inflating
+every ratio metric's denominator; the filtered page is the honest
+one.)
+
+1. **True channel routing** — only if the last ~36 congestion stubs
    ever matter enough; payoff now small.
+2. **More sources / periodic re-validation** — the corpus has 5
+   authors and 46 cases; keep adding when new netlist styles appear
+   (untapped: audiodac.spice 4896 lines, xschem .sch designs,
+   Berkeley course circuits).
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

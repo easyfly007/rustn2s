@@ -500,6 +500,8 @@ Added 2026-07-04. Fourth and fifth netlist authors: the **ngspice project's dist
 | 45 | Wien-bridge oscillator | ngspice `examples/Monte_Carlo/OpWien.sp` | Parser stress: behavioral `R='expr'`/`C='expr'`, `trrandom` sources, `$` comments, inline `.model`; first OSCILLATOR topology (global feedback, no driving input) |
 | 46 | SPM multiplier, post-PnR | sky130A `xschem_verilog_import/spm.spice` | **1188 stdcell instances — new scale record (1.7× case 36)**; first post-PnR netlist: 700+ physical-only decap/fill/tap cells |
 
+Case 46's filler follow-up (same day): physical-only cells — X instances whose every pin is a power net — are now filtered by default (`--keep-physical-cells` opts out): 1188 → 390 components, canvas area ÷4.8. Its quality metric *dropped* from 0.48 to 0.33 in the process: the 700 wire-less filler boxes had been inflating every ratio metric's denominator, a textbook metric artifact.
+
 Case 46 paid out twice: (1) two same-model stdcell buffers scattered across the canvas were scored as a failed "mirror pair" — Tier 1 red; the symmetry exclusion generalized from synthetic gates to ALL non-FET box instances (metric + placer, `fet_model_polarity` shared helper). (2) Runtime was 42 s: A* allocated ~50 MB of dense state per call on the folded canvas, and unreachable goals flooded the whole grid — fixed with sparse state maps + an expansion budget; then HAC's all-pairs scan surfaced as the next bottleneck (~8 s) and was cut to net-sharing candidate pairs only. **The full 46-case sweep now runs in 0.6 s total.** Known enhancement recorded: physical-only filler cells (power pins only) dominate 2/3 of 46's canvas and deserve a filter.
 
 ---
