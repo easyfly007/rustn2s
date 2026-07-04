@@ -246,10 +246,10 @@ impl SchematicPlacer {
             }
         } else {
             let mut x_cursor = 0.0;
-            for l in 0..layers.len() {
+            for w in strip_w.iter().take(layers.len()) {
                 layer_x_start.push(x_cursor);
                 layer_y_start.push(0.0);
-                x_cursor += strip_w[l];
+                x_cursor += w;
             }
         }
 
