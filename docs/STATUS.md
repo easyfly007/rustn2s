@@ -16,9 +16,9 @@ before you feel tempted to tune any constant.
 **State**: stable. Working tree clean, 173 tests pass (~9 s: the
 test profile builds with opt-level 1 because integration tests now
 convert a 4256-instance netlist), all commits pushed to
-`origin/main`. The full 49-case convert+eval sweep runs in ~2 s.
+`origin/main`. The full 53-case convert+eval sweep runs in ~2 s.
 
-**Test set**: 49 circuits in `tests/examples/`, six authors:
+**Test set**: 53 circuits in `tests/examples/`, six authors:
 - 01–25: MySchematic C++ suite + hand-written adversarial cases;
 - 26–36: real netlists from the sibling `myadc` SAR-ADC repo;
 - 37–39: SkyWater sky130 stdcell library cells;
@@ -26,11 +26,12 @@ convert a 4256-instance netlist), all commits pushed to
 - 42–43: OpenRAM-generated SRAM decoder + replica column;
 - 44–46: ngspice distribution examples + xschem Verilog-import
   post-PnR multiplier;
-- 47–49: xschem audiodac (4256 instances, the scale record —
-  first-run PASS, 1.2 s) + two original UC Berkeley SPICE2 decks
-  (RCA 3040, 1966; the mosamp NMOS opamp).
+- 47–53: xschem audiodac (4256 instances, the scale record —
+  first-run PASS, 1.2 s), four UC Berkeley SPICE2 decks (RCA 3040,
+  mosamp, Schmitt trigger, diff pair), and two sky130 hvl cells
+  (LV→HV level shifter with a live LVPWR rail, 42-FET scan DFF).
 
-All 49 pass Tier 1 safety, deterministically (every HashMap-ordered
+All 53 pass Tier 1 safety, deterministically (every HashMap-ordered
 decision point that affects geometry now iterates sorted keys; Tier 2
 scores still jitter a little on a few circuits — case 16 flips
 between 0.575/0.647 run to run).
@@ -87,13 +88,13 @@ the findings doc or scale_placement.md):
 
 ## What's left (in priority order)
 
-1. **Corpus growth / periodic re-validation** — six authors and 49
-   cases; batch 6 (audiodac + Berkeley decks) found only one
-   self-inflicted footgun (embedded title lines parse as devices
-   when a header displaces them from line 1 — comment them out).
-   Untapped: xschem `.sch` designs (need xschem to netlist), more
-   Berkeley decks (`schmitt.cir`, `diffpair.cir` in ngspice
-   tests/general), sky130_fd_sc_hvl cells.
+1. **Corpus growth / periodic re-validation** — six authors and 53
+   cases. Batch 7's find: symmetry's model-keyed pairing broke on a
+   deck using two model names for identical BJTs (fixed: same-column
+   exemption widened to one symbol width, matching power_convention).
+   Untapped: xschem `.sch` designs (xschem NOT installed here),
+   remaining Berkeley decks (rtlinv, mosmem), hvl multi-cell
+   compositions.
 2. **True channel routing** — only if the last ~36 congestion label
    stubs on case 36 or trunk-crossing aesthetics ever matter enough;
    `routing_improvement.md` explains why the payoff shrank.
@@ -119,7 +120,7 @@ appears, find the test data that triggers it.
 cargo build --release
 cargo test                    # 173 tests, all green expected
 
-# Full sweep with the two-tier profile (~2 s for all 49)
+# Full sweep with the two-tier profile (~2 s for all 53)
 mkdir -p output
 for f in tests/examples/*.sp; do
   name=$(basename "$f" .sp)

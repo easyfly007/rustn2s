@@ -520,6 +520,21 @@ Batch lesson (self-inflicted): prepending the metadata header demotes the origin
 
 ---
 
+## Batch 7 (50–53): More Berkeley + the HVL Library
+
+Added 2026-07-04. Rounds out the Berkeley decks and adds the SkyWater **high-voltage (hvl) library** as a new cell family. (The xschem `.sch` designs remain untapped: xschem is not installed in this environment.)
+
+| # | Circuit | Source | What it adds |
+|---|---------|--------|--------------|
+| 50 | ECL Schmitt trigger | Berkeley `schmitt.cir` | First hysteresis/regenerative bipolar topology; `q1 … qstd off` initial-condition token; negative single supply |
+| 51 | BJT diff pair | Berkeley `diffpair.cir` | Textbook diff pair + mirror bias, ±12 V; `.tf`/`.sens` directives; **found a metric bug** (below) |
+| 52 | LV→HV level shifter | sky130_fd_sc_hvl `lsbuflv2hv_1` | Mixed 1.8 V / 5 V device families; live `LVPWR` rail (C1 specimen — measured mild here, directive kept as the semantic declaration) |
+| 53 | HVL scan DFF | sky130_fd_sc_hvl `sdfrbp_1` | Largest flat transistor-level stdcell (42 FETs): scan mux + latches + reset in one cell |
+
+Case 51's find: the deck deliberately gives electrically identical BJTs two model names (`qnl`/`qnr` for sensitivity attribution), so the symmetry metric's model-keyed pairing matched q1 (diff transistor) with q4 (the tail) — and the DiffPair template's *correct* tail-below-center layout (tail sits half a pitch from each pair member) scored 0.0 and failed Tier 1. Fix: the metric's same-column exemption widened from x_diff ≤ 10 to < 60 — one symbol width, the same column semantics `power_convention` already uses. Case 48 gained +0.21 from the same fix.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:

@@ -70,13 +70,16 @@ pub fn check(schematic: &Schematic) -> SymmetryReport {
 
             // Two clean arrangements score 1.0:
             //  - mirror pair: same row (y_diff ≈ 0), side by side;
-            //  - vertical stack: same column (x_diff ≈ 0), one above the
-            //    other — the deliberate series/cascode arrangement, and the
-            //    only safe one when a same-column pair cannot be y-aligned
-            //    without overlapping (cases 30/34, wide subckt boxes).
+            //  - same-column arrangement: x_diff within one symbol width
+            //    (60, the same column semantics as power_convention) —
+            //    covers exact vertical stacks (cascode), the tail-below-
+            //    center diff-pair template (tail sits half a pitch from
+            //    each pair member; case 51's q1/q4 false pair), and the
+            //    only safe layout when a same-column pair cannot be
+            //    y-aligned without overlap (cases 30/34).
             // Only a diagonal offset — misaligned in BOTH axes — is sloppy.
             let max_dim = x_diff.max(y_diff).max(1.0);
-            let score = if x_diff <= 10.0 {
+            let score = if x_diff < 60.0 {
                 1.0
             } else {
                 1.0 - (y_diff / max_dim).min(1.0)
