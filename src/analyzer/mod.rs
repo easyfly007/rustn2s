@@ -105,8 +105,13 @@ impl CircuitAnalyzer {
     }
 
     pub fn identify_power_nets(&self, devices: &[SpiceDevice]) -> HashSet<String> {
+        // vpwr/vgnd/vpb/vnb are the SkyWater / open-PDK standard rail and
+        // bulk-tap names (every sky130_fd_sc_* cell uses them) — as
+        // conventional as vdd/vss in that ecosystem, so they belong in the
+        // builtin vocabulary rather than behind an `n2s: power_net` hint.
         let mut power: HashSet<String> = [
             "0", "gnd", "gnd!", "vss", "vss!", "vdd", "vdd!", "vcc", "vcc!", "avdd", "avss",
+            "vpwr", "vgnd", "vpb", "vnb",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -625,7 +630,7 @@ impl CircuitAnalyzer {
                 let node1_lower = dev.nodes[1].to_lowercase();
                 let is_ground = matches!(
                     node1_lower.as_str(),
-                    "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss"
+                    "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss" | "vgnd"
                 );
                 if !is_ground {
                     block.input_nets.push(dev.nodes[1].clone());

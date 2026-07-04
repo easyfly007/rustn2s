@@ -491,8 +491,15 @@ two new crossings, layout still coherent), all 41 stay Tier 1 green.
   lookup or user hints (the `n2s:` directive namespace now exists for
   exactly this kind of hint).
 - **Stdcell cases 37–39** (sky130_fd_sc_hd dfxtp_1/fa_1/mux4_1) bring
-  `VPWR`/`VGND`/`VPB`/`VNB` rails — none in the hardcoded power list,
-  so these cells route their rails as signal wires. All three pass
-  Tier 1 regardless; whether to add the SkyWater rail names to the
-  builtin list (4 obvious entries) or require the directive is an
-  open call for the next session.
+  `VPWR`/`VGND`/`VPB`/`VNB` rails — initially not in the hardcoded
+  power list, so these cells routed their rails as signal wires.
+  **RESOLVED (2026-07-04)**: the four names joined the builtin
+  vocabulary — they are the SkyWater / open-PDK standard rail and
+  bulk-tap names, as conventional as vdd/vss in that ecosystem, so
+  this is recognized vocabulary, not constant-tuning. All five
+  hardcoded rail lists updated in sync (analyzer power set, V/I
+  ground check, router power-symbol typing, parser bulk heuristic,
+  placer is_rail). Effect: rails render as power symbols, PMOS-top
+  ordering applies, and 37/38/39 improved on every sub-score
+  (37 shape 0.43→0.85, txt 0.83→0.95). The `n2s: power_net`
+  directive remains the answer for genuinely custom rails.

@@ -56,10 +56,6 @@ gone, though Tier 2 scores still jitter slightly).
   (`g45p1svt`) and bulk on a bias net renders PMOS-as-NMOS. No
   metric can catch a wrong symbol. Real fix = model-card lookup or
   an `n2s:` polarity hint; the test case keeps the gap visible.
-- **SkyWater rail names** (cases 37–39): `VPWR`/`VGND`/`VPB`/`VNB`
-  are not in the hardcoded power list. The cells pass Tier 1 anyway;
-  adding the four names to the builtin list vs. requiring the
-  directive is an open call.
 - **Scale (cases 29/36)**: 92 and 684 devices run fast (~0.15 s) but
   the layouts are hairballs (`cross≈0`, `wire≈0.04`). The bottleneck
   is HAC + Sugiyama at scale, not speed and not routing.
@@ -72,12 +68,15 @@ gone, though Tier 2 scores still jitter slightly).
 2026-07-04: sources/emitters are block inputs, external diff-pair
 tails are inputs, XPT sits beside its pair. See the findings doc.)
 
-1. **Decide the SkyWater rail question** (4-line change or a
-   documented "use the directive" stance).
-2. **Scale design doc** — placement strategy for 100+ devices
+(SkyWater rails — the former #1 — resolved on 2026-07-04:
+`vpwr`/`vgnd`/`vpb`/`vnb` joined the builtin vocabulary across all
+five hardcoded rail lists; they are ecosystem-standard names, not
+tuning. Cases 37–39 improved across the board.)
+
+1. **Scale design doc** — placement strategy for 100+ devices
    (grid/matrix placement for gate-array-like netlists?), then the
    A* routing spec.
-3. **More external sources** — ngspice distribution examples,
+2. **More external sources** — ngspice distribution examples,
    Berkeley course circuits. Every new author is a new bug lottery.
 
 ### Avoid (unchanged from the 2026-05-01 audit)

@@ -362,10 +362,13 @@ fn power_type_from_name(name: &str) -> PowerType {
     let lower = name.to_lowercase();
     if matches!(
         lower.as_str(),
-        "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss"
+        "0" | "gnd" | "gnd!" | "vss" | "vss!" | "avss" | "vgnd" | "vnb"
     ) {
         PowerType::GND
-    } else if matches!(lower.as_str(), "vdd" | "vdd!" | "vcc" | "vcc!" | "avdd") {
+    } else if matches!(
+        lower.as_str(),
+        "vdd" | "vdd!" | "vcc" | "vcc!" | "avdd" | "vpwr" | "vpb"
+    ) {
         PowerType::VDD
     } else {
         PowerType::Custom

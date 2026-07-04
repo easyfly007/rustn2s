@@ -247,10 +247,13 @@ impl SpiceParser {
         // Bulk connection heuristic (SPICE order: D G S B → index 3)
         if device.nodes.len() >= 4 {
             let bulk = device.nodes[3].to_lowercase();
-            if matches!(bulk.as_str(), "0" | "gnd" | "vss" | "gnd!") {
+            if matches!(bulk.as_str(), "0" | "gnd" | "vss" | "gnd!" | "vgnd" | "vnb") {
                 return "nmos4";
             }
-            if matches!(bulk.as_str(), "vdd" | "vdd!" | "vcc" | "avdd") {
+            if matches!(
+                bulk.as_str(),
+                "vdd" | "vdd!" | "vcc" | "avdd" | "vpwr" | "vpb"
+            ) {
                 return "pmos4";
             }
         }

@@ -523,6 +523,10 @@ impl SchematicPlacer {
                         | "vcc!"
                         | "avdd"
                         | "avss"
+                        | "vpwr"
+                        | "vgnd"
+                        | "vpb"
+                        | "vnb"
                 )
             };
             let signal_nets: Vec<String> = block
