@@ -114,18 +114,42 @@ nodes — exactly the move that already worked once this cycle
 
 ## 4. Phased plan
 
-### Phase 0 — bounded fixes, then RE-MEASURE (gate for everything else)
+### Phase 0 — bounded fixes, then RE-MEASURE — **DONE 2026-07-04**
 
-1. Fix the HAC early-exit (RC1): skip ineligible pairs, don't break.
-2. Extend `transistor_type()` to X-FETs (RC2).
-3. Re-run the 41-case sweep + the stats instrumentation on 29/36/37.
+1. ✅ HAC early-exit fixed (capped pairs are skipped, not a stop signal).
+2. ✅ `transistor_type()` accepts X-FETs.
+3. ✅ Stats re-measured (`N2S_DEBUG_STATS=1` is now a permanent
+   env-gated diagnostic on the placer).
 
-Expected: 37 recovers pattern blocks like 31 did; 29/36 block counts
-drop several-fold; layer counts shrink accordingly. Tier 2 scores will
-shift on MANY circuits (any Unknown cluster may regroup) — evaluate
-honestly, all 41 must stay Tier 1 green. **Decision point: if 29/36
-reach "readable ribbon" territory (layers ≤ ~40, no dump layer),
-Phase 1 may not be worth its complexity yet.**
+Results:
+
+| case | blocks (before → after) | singletons | layers | quality |
+|---|---|---|---|---|
+| 29 | 87 → **23** | 86 → 5 | 33 → **2** | 0.27 → 0.32 |
+| 36 | 679 → **213** | 678 → 2 | 261 → **132** | 0.27 → 0.26 |
+| 37 | 19 → **12** | 18 → 0 | 6 → 8 | 0.32 → 0.33 |
+
+- **Case 29 is transformed**: 2 layers × grid columns, visually a
+  near-legible gate-level SAR controller (bit-slices in columns).
+- **Case 36 remains a ribbon** (132 layers) and its quality didn't
+  move. Worse, mirror-matching misfires at transistor granularity:
+  one "CurrentMirror" block glommed 56 clock-gated nfets (gate=clk,
+  source=vss looks diode-adjacent to the matcher). **Decision: 36
+  needs Phase 1 (gate extraction) — pattern matchers built for
+  analog idioms cannot parse flat digital transistor soup, exactly
+  as RC4 predicted.**
+- Suite effect: net positive (21 +0.16, 33 +0.08, 37 +0.07, 29 +0.06,
+  30 +0.04); case 35 dropped 0.76 → 0.47 — the bootstrap's
+  non-textbook topology now triggers pattern matches that reshape
+  its layout (crossings + text crowding). Recorded, not tuned away.
+- Determinism follow-ups shaken out: the diff-pair and mirror
+  finders iterated HashMaps (flaky Tier 1 on case 34 once X-FETs
+  flooded them) — both now iterate sorted keys; and pair alignment
+  gained a last-resort single-device move for passives (R/C/L leaf
+  devices may leave their block when both whole-block shifts are
+  vetoed — case 34's CL1/CL2 caps, scattered to opposite canvas
+  ends, each blocked by a legitimate neighbor).
+- Runtime at 684 devices: 0.19 s (HAC now runs to completion).
 
 ### Phase 1 — CMOS gate extraction (the structural answer to RC4)
 

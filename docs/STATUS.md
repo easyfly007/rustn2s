@@ -78,13 +78,17 @@ tails are inputs, XPT sits beside its pair. See the findings doc.)
 five hardcoded rail lists; they are ecosystem-standard names, not
 tuning. Cases 37–39 improved across the board.)
 
-1. **Scale Phase 0** (`docs/scale_placement.md`): fix the HAC
-   early-exit bug, extend pattern matchers to X-FETs, re-measure
-   29/36/37, then decide whether Phase 1 (gate extraction) is still
-   needed.
+(Scale Phase 0 landed 2026-07-04: HAC early-exit fixed, X-FET
+pattern matching on, case 29 transformed (33 layers → 2). Decision
+from the re-measure: case 36 still needs Phase 1 — see
+scale_placement.md for the numbers.)
+
+1. **Scale Phase 1** (`docs/scale_placement.md`): CMOS gate
+   extraction → collapse to boxes → existing Sugiyama at gate
+   granularity. Prerequisite first: ≥2 more large netlists from
+   other authors.
 2. **More external sources** — ngspice distribution examples,
-   Berkeley course circuits; also a prerequisite for scale Phase 1
-   (two test cases are not a design basis).
+   Berkeley course circuits; doubles as the Phase 1 prerequisite.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

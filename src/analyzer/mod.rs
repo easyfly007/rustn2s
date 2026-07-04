@@ -140,6 +140,13 @@ impl CircuitAnalyzer {
         match dev.device_type {
             'M' if dev.nodes.len() >= 4 => Some(SpiceParser::infer_mos_type(dev).to_string()),
             'Q' if dev.nodes.len() >= 3 => Some(SpiceParser::infer_bjt_type(dev).to_string()),
+            // X instances of PDK FET primitives follow the same
+            // (drain, gate, source, bulk) convention, so every pattern
+            // finder works on them unchanged. Without this the finders
+            // were blind to all-X netlists: the same TG-DFF yields
+            // 4 Inverter + 4 CascodePair blocks from M cards but 18
+            // singletons from X cards (scale_placement.md RC2).
+            'X' => SpiceParser::infer_x_transistor_type(dev).map(|s| s.to_string()),
             _ => None,
         }
     }
@@ -171,7 +178,12 @@ impl CircuitAnalyzer {
             groups.entry((ttype, source.clone())).or_default().push(i);
         }
 
-        for group in groups.values() {
+        // Sorted-key iteration: HashMap order is random per run, and which
+        // pair forms first changes downstream placement — Tier 1 symmetry
+        // was flaky on case 34 once X-FETs flooded the finders.
+        let mut sorted_groups: Vec<_> = groups.iter().collect();
+        sorted_groups.sort_by(|a, b| a.0.cmp(b.0));
+        for (_, group) in sorted_groups {
             if group.len() < 2 {
                 continue;
             }
@@ -274,7 +286,11 @@ impl CircuitAnalyzer {
             groups.entry(key).or_default().push(i);
         }
 
-        for group in groups.values() {
+        // Sorted-key iteration for run-to-run determinism (same reasoning
+        // as find_diff_pairs above).
+        let mut sorted_groups: Vec<_> = groups.iter().collect();
+        sorted_groups.sort_by(|a, b| a.0.cmp(b.0));
+        for (_, group) in sorted_groups {
             if group.len() < 2 {
                 continue;
             }
@@ -495,6 +511,17 @@ impl CircuitAnalyzer {
                     let members_a = &cluster_members[&id_a];
                     let members_b = &cluster_members[&id_b];
 
+                    // A pair that would exceed the size cap is INELIGIBLE,
+                    // not a stop signal. The old post-selection check
+                    // `break`-ed the whole loop the first time the globally
+                    // best pair was capped — one hub-fed cluster filled to
+                    // max_cluster_size, kept winning the score race, and
+                    // clustering exited: case 36 ended with 678 singleton
+                    // blocks out of 684 devices (scale_placement.md RC1).
+                    if members_a.len() + members_b.len() > opts.max_cluster_size {
+                        continue;
+                    }
+
                     let mut total_weight = 0i32;
                     for &da in members_a {
                         for &db in members_b {
@@ -518,11 +545,6 @@ impl CircuitAnalyzer {
             }
 
             if !found || best_score < opts.merge_threshold {
-                break;
-            }
-
-            let merged_size = cluster_members[&best_a].len() + cluster_members[&best_b].len();
-            if merged_size > opts.max_cluster_size {
                 break;
             }
 

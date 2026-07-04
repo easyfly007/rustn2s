@@ -118,6 +118,33 @@ impl SchematicPlacer {
             layers[l].push(i);
         }
 
+        // Diagnostic stats for scale work (docs/scale_placement.md).
+        // Opt-in via env var; goes to stderr so it never pollutes output.
+        if std::env::var("N2S_DEBUG_STATS").is_ok() {
+            let mut sizes: Vec<usize> = blocks.iter().map(|b| b.device_indices.len()).collect();
+            sizes.sort_unstable();
+            let singletons = sizes.iter().filter(|&&s| s == 1).count();
+            eprintln!(
+                "STATS blocks={} singletons={} sizes(min/med/max)={}/{}/{}",
+                blocks.len(),
+                singletons,
+                sizes.first().unwrap_or(&0),
+                sizes.get(sizes.len() / 2).unwrap_or(&0),
+                sizes.last().unwrap_or(&0)
+            );
+            let mut widths: Vec<usize> = layers.iter().map(|l| l.len()).collect();
+            let max_w = widths.iter().max().copied().unwrap_or(0);
+            widths.sort_unstable();
+            eprintln!(
+                "STATS dag_edges={} layers={} layer_width(med/max)={}/{} last_layer={}",
+                graph.edges.len(),
+                layers.len(),
+                widths.get(widths.len() / 2).unwrap_or(&0),
+                max_w,
+                layers.last().map(|l| l.len()).unwrap_or(0)
+            );
+        }
+
         // 3. Crossing minimization
         Self::minimize_crossings(&mut layers, &graph, 4);
 
@@ -375,6 +402,7 @@ impl SchematicPlacer {
                     [(block_b, di_a, di_b), (block_a, di_b, di_a)]
                 };
 
+                let mut aligned = false;
                 for (move_block, anchor_di, move_di) in candidates {
                     let anchor_pi = dev_to_placement[&anchor_di];
                     let move_pi = dev_to_placement[&move_di];
@@ -382,6 +410,7 @@ impl SchematicPlacer {
                     // Delta to align the moving device with the anchor's y
                     let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
                     if dy.abs() < opts.grid_size {
+                        aligned = true;
                         break;
                     }
 
@@ -421,7 +450,41 @@ impl SchematicPlacer {
                         }
                     }
                     moved_any = true;
+                    aligned = true;
                     break;
+                }
+
+                // Last resort when BOTH whole-block moves are vetoed:
+                // passives (R/C/L) are leaf decorations, so moving just the
+                // device — without its block — doesn't hurt readability.
+                // Case 34's CL1/CL2 load caps were scattered to opposite
+                // canvas ends by clustering, and each block shift collided
+                // with a legitimate neighbor (VVDD on one side, the XP3/XP4
+                // latch on the other).
+                if !aligned && matches!(devices[di_a].device_type, 'R' | 'C' | 'L') {
+                    for (move_di, anchor_di) in [(di_a, di_b), (di_b, di_a)] {
+                        let (anchor_pi, move_pi) =
+                            (dev_to_placement[&anchor_di], dev_to_placement[&move_di]);
+                        let dy = placements[anchor_pi].position.y - placements[move_pi].position.y;
+                        if dy.abs() < opts.grid_size {
+                            break;
+                        }
+                        let moved_pos = Point::new(
+                            placements[move_pi].position.x,
+                            placements[move_pi].position.y + dy,
+                        )
+                        .snap_to_grid(opts.grid_size);
+                        let collides = placements.iter().enumerate().any(|(pi, p)| {
+                            pi != move_pi
+                                && p.device_index < devices.len()
+                                && rects_collide(move_di, moved_pos, p.device_index, p.position)
+                        });
+                        if !collides {
+                            placements[move_pi].position = moved_pos;
+                            moved_any = true;
+                            break;
+                        }
+                    }
                 }
             }
             if !moved_any {
