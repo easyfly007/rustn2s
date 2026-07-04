@@ -29,6 +29,16 @@ pub struct Label {
     pub position: Point,
 }
 
+/// Rendered width of a net-label box: adapts to the text (10px monospace,
+/// ~6px/char) with the historical 50px minimum. Shared by the SVG
+/// renderer, the router's label-collision checks, and the text_overlap
+/// metric — geometry consumers must agree or guards and metrics fight
+/// (the standing lesson). Long extraction-style names (`a_1999_126#`)
+/// overflowed the old fixed 50px box.
+pub fn label_box_width(name: &str) -> f64 {
+    50.0_f64.max(name.len() as f64 * 6.0 + 10.0)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSymbol {
     pub power_type: PowerType,

@@ -210,8 +210,9 @@ fn compute_bounds(
         }
     }
     for label in &sch.labels {
-        expand(label.position.x - 30.0, label.position.y - 10.0);
-        expand(label.position.x + 30.0, label.position.y + 10.0);
+        let hw = crate::model::label_box_width(&label.name) / 2.0 + 5.0;
+        expand(label.position.x - hw, label.position.y - 10.0);
+        expand(label.position.x + hw, label.position.y + 10.0);
     }
     for ps in &sch.power_symbols {
         expand(ps.position.x - 15.0, ps.position.y - 15.0);
@@ -581,13 +582,14 @@ fn render_labels(svg: &mut String, sch: &Schematic, ox: f64, oy: f64, opts: &Svg
     for label in &sch.labels {
         let lx = label.position.x * sc + ox;
         let ly = label.position.y * sc + oy;
+        let w = crate::model::label_box_width(&label.name);
         writeln!(
             svg,
             "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" \
             fill=\"{}\" stroke=\"{}\" stroke-width=\"1\"/>",
-            lx - 25.0 * sc,
+            lx - w / 2.0 * sc,
             ly - 8.0 * sc,
-            50.0 * sc,
+            w * sc,
             16.0 * sc,
             opts.theme.label_bg,
             opts.theme.label_color

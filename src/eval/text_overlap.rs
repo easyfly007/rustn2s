@@ -85,11 +85,12 @@ pub fn check(
     // Text elements: (description, rect, owner-component index or None).
     let mut texts: Vec<(String, Rect, Option<usize>)> = Vec::new();
 
-    // Net label boxes (svg.rs: x-25, y-8, 50x16).
+    // Net label boxes (svg.rs: text-adaptive width, 16 tall).
     for label in &schematic.labels {
+        let w = crate::model::label_box_width(&label.name);
         texts.push((
             format!("label \"{}\"", label.name),
-            Rect::new(label.position.x - 25.0, label.position.y - 8.0, 50.0, 16.0),
+            Rect::new(label.position.x - w / 2.0, label.position.y - 8.0, w, 16.0),
             None,
         ));
     }

@@ -201,6 +201,28 @@ impl SchematicRouter {
                 Some(Rect::new(min_x, min_y, max_x - min_x, max_y - min_y))
             })
             .collect();
+
+        // Instance-name captions are text obstacles for labels too (case
+        // 48: net labels printed straight over the q9/r5/... captions).
+        // Same anchoring and metrics as the text_overlap check: 11px
+        // monospace at the symbol's top-right corner.
+        let caption_rects: Vec<Rect> = schematic
+            .components
+            .iter()
+            .filter(|c| !c.instance_name.is_empty())
+            .filter_map(|comp| {
+                let base = symbol_map.get(&comp.symbol_name)?.bounding_rect();
+                let ax = comp.position.x + base.right() + 4.0;
+                let ay = comp.position.y + base.top() - 2.0;
+                Some(Rect::new(
+                    ax,
+                    ay - 5.5,
+                    comp.instance_name.len() as f64 * 6.6,
+                    11.0,
+                ))
+            })
+            .collect();
+        let body_rects: Vec<Rect> = body_rects.into_iter().chain(caption_rects).collect();
         // Scale Phase 3: obstacle avoidance turns ON automatically in the
         // scale regime. In box-dense gate/cell grids, L-routes blow through
         // component bodies constantly; A* body-dodging is a large win in
@@ -417,13 +439,19 @@ impl SchematicRouter {
         opts: &RouterOptions,
         body_rects: &[Rect],
     ) {
-        // A label rect is 50x16 centered on its anchor; reject anchors whose
-        // rect intrudes into any component body (in dense grids the default
+        // A label rect is text-width x 16 centered on its anchor (shared
+        // geometry: model::label_box_width); reject anchors whose rect
+        // intrudes into any component body (in dense grids the default
         // outward offset can land inside a NEIGHBOR component) or overlaps
         // an already-placed label from ANY net.
-        let mut anchors_taken: Vec<Point> = schematic.labels.iter().map(|l| l.position).collect();
-        let label_clear = |anchor: Point, taken: &[Point]| -> bool {
-            let (l, r) = (anchor.x - 25.0, anchor.x + 25.0);
+        let half_w = crate::model::label_box_width(net_name) / 2.0;
+        let mut anchors_taken: Vec<(Point, f64)> = schematic
+            .labels
+            .iter()
+            .map(|l| (l.position, crate::model::label_box_width(&l.name) / 2.0))
+            .collect();
+        let label_clear = |anchor: Point, taken: &[(Point, f64)]| -> bool {
+            let (l, r) = (anchor.x - half_w, anchor.x + half_w);
             let (t, b) = (anchor.y - 8.0, anchor.y + 8.0);
             let body_hit = body_rects.iter().any(|br| {
                 l + 1.0 < br.right()
@@ -431,9 +459,9 @@ impl SchematicRouter {
                     && t + 1.0 < br.bottom()
                     && br.top() + 1.0 < b
             });
-            let label_hit = taken
-                .iter()
-                .any(|p| (p.x - anchor.x).abs() < 50.0 && (p.y - anchor.y).abs() < 16.0);
+            let label_hit = taken.iter().any(|(p, phw)| {
+                (p.x - anchor.x).abs() < half_w + phw && (p.y - anchor.y).abs() < 16.0
+            });
             !body_hit && !label_hit
         };
 
@@ -442,7 +470,16 @@ impl SchematicRouter {
         let mut labeled_positions: Vec<Point> = Vec::new();
         for &pi in label_pins {
             let pin = &pins[pi];
-            let off = pin.label_offset;
+            // Scale the horizontal outward offset with the label's width so
+            // a wide box (long extraction-style net name) still clears the
+            // pin and its symbol instead of being centered over them.
+            let off = {
+                let mut o = pin.label_offset;
+                if o.x != 0.0 {
+                    o.x = o.x.signum() * o.x.abs().max(half_w + 5.0);
+                }
+                o
+            };
             // Candidate anchors in preference order: the default outward
             // offset, further out, perpendicular (above/below), flipped.
             let candidates = [
@@ -462,7 +499,7 @@ impl SchematicRouter {
                 .map(|p| p.snap_to_grid(opts.grid_size))
                 .find(|p| label_clear(*p, &anchors_taken))
                 .unwrap_or_else(|| (pin.position + off).snap_to_grid(opts.grid_size));
-            anchors_taken.push(label_pos);
+            anchors_taken.push((label_pos, half_w));
 
             // Skip duplicate labels at the same anchor point
             if labeled_positions.iter().any(|p| close(p, &label_pos)) {
