@@ -474,6 +474,22 @@ All six pass Tier 1 safety (after the `power_convention` fix motivated by 31). V
 
 ---
 
+## Batch 3 (37–41): Non-myadc Sources + Audit-Gap Probes
+
+Added 2026-07-04. Two sources this time: the **sky130A PDK standard-cell library** (Google/SkyWater-authored netlists — the first cases from outside the myadc repo) and **hand-written probes** for the two audit blind spots (C1/C2) that no real corpus netlist could cover.
+
+| # | Circuit | Source | Devices | What it adds |
+|---|---------|--------|:-------:|--------------|
+| 37 | `dfxtp_1` D flip-flop | sky130_fd_sc_hd stdcell lib | 24 X-FETs | Foundry TG DFF; `VPWR`/`VGND`/`VPB`/`VNB` rails (none in the hardcoded power list); extraction-style net names |
+| 38 | `fa_1` full adder | sky130_fd_sc_hd stdcell lib | 28 X-FETs | 3-high series stacks in carry/sum trees |
+| 39 | `mux4_1` 4:1 mux | sky130_fd_sc_hd stdcell lib | 26 X-FETs | Pass-gate tree — drain AND source carry signals, hard for flow inference |
+| 40 | LDO with internal rail | hand-written (audit C1) | 15 (9 M) | `vreg` is a supply the tool cannot discover; **found a real Tier-1 failure** (see below) and motivated the new `* n2s: power_net <name>` netlist directive |
+| 41 | Opaque models + signal bulk | hand-written (audit C2) | 15 (8 M) | `g45p1svt` + bulk-on-bias-net defeats both type-inference rules; M5 (PMOS) renders as NMOS — a **known, documented gap** kept visible by this case |
+
+Case 40's findings: without the directive, `vreg` is a signal → the MLP/MLN inverter goes unrecognized (the matcher requires the PMOS source on a power net) → laid out horizontally → Tier 1 power_convention failed. Two fixes landed: the `n2s: power_net` comment directive (parser → analyzer → placer/router), and a power_convention refinement — only devices whose horizontal symbol extents overlap are compared (the old 100px window flagged pairs in *neighboring* columns).
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:

@@ -463,12 +463,29 @@ instead of beside XP1/XP2). Classifying pair-source nets as inputs
 would chain stacks in the DAG; blast radius covers all M circuits, so
 it needs its own pass of scrutiny.
 
-## Still uncovered after batch 2
+## Batch 3 closes the C1/C2 loop (2026-07-04)
 
-- **C1** (power net not sourced by a V/I device) — no myadc netlist
-  exercises this; needs an LDO-style case.
-- **C2** (M card with non-matching model name AND non-power bulk) —
-  the real bulk-on-signal circuits in myadc (bootstrap variants) are
-  either `nch`/`pch` M cards (keyword check hits first) or sky130 X
-  instances (no M-card inference at all). A realistic C2 specimen
-  still doesn't exist in this corpus.
+- **C1 — covered by case 40** (hand-written LDO whose output `vreg`
+  powers a load inverter). The probe paid out immediately: with
+  `vreg` unclassifiable as power, the inverter matcher missed MLP/MLN
+  (it requires the PMOS source on a power net), the pair was laid out
+  horizontally, and Tier 1 power_convention failed. Fixes: the new
+  `* n2s: power_net <name>` netlist comment directive (bulk-tie
+  heuristics were rejected — the triple-well bootstrap in case 35 is
+  a real counterexample where source==bulk is a SIGNAL), plus a
+  power_convention refinement: only devices whose horizontal symbol
+  extents overlap (|dx| < 60) are compared — the old 100px window
+  flagged pairs in neighboring columns.
+- **C2 — covered by case 41** (gpdk-style `g45n1svt`/`g45p1svt` names
+  + bulks on bias nets). Both inference rules fail as predicted and
+  M5 (a PMOS) renders with an NMOS symbol. No metric can catch a
+  wrong symbol; the case exists to keep the gap visible, and its
+  header documents it as KNOWN GAP. A real fix needs model-card
+  lookup or user hints (the `n2s:` directive namespace now exists for
+  exactly this kind of hint).
+- **Stdcell cases 37–39** (sky130_fd_sc_hd dfxtp_1/fa_1/mux4_1) bring
+  `VPWR`/`VGND`/`VPB`/`VNB` rails — none in the hardcoded power list,
+  so these cells route their rails as signal wires. All three pass
+  Tier 1 regardless; whether to add the SkyWater rail names to the
+  builtin list (4 obvious entries) or require the directive is an
+  open call for the next session.

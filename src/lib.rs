@@ -96,8 +96,13 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
 
     // 2. Analyze
     let analyzer = CircuitAnalyzer::new();
-    let power_nets = analyzer.identify_power_nets(devices);
-    let blocks = analyzer.analyze(devices, &opts.cluster);
+    let mut power_nets = analyzer.identify_power_nets(devices);
+    // Rails declared in-netlist via `* n2s: power_net <name>` directives
+    // (audit item C1: e.g. an LDO's regulated output used as a supply).
+    for net in &pr.extra_power_nets {
+        power_nets.insert(net.to_lowercase());
+    }
+    let blocks = analyzer.analyze_with_power_nets(devices, &opts.cluster, &power_nets);
 
     // 3. Place (with device info for cross-block symmetry alignment)
     let placer = SchematicPlacer;

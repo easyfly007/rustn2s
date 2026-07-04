@@ -37,14 +37,19 @@ pub fn check(schematic: &Schematic) -> PowerConventionReport {
     // always put the lower stage's PMOS below the upper stage's NMOS, yet
     // each stage is internally P-above-N (see test case 31, the TG DFF).
     let mut violations = Vec::new();
-    let x_threshold = 100.0; // Only compare devices in similar columns
+    // Compare only devices whose horizontal symbol extents overlap — a
+    // MOSFET symbol is ~60px wide, so anything offset by a full symbol
+    // width sits in a NEIGHBORING column, and P-above-N is a per-column
+    // convention. The previous 100px window flagged cross-column pairs
+    // (case 40: MPASS below the unrelated MLN one column over).
+    let x_threshold = 60.0;
     let mut compared = 0usize;
     let mut valid_pairs = 0usize;
 
     for (pname, px, py) in &pmos {
         let nearest = nmos
             .iter()
-            .filter(|(_, nx, _)| (px - nx).abs() <= x_threshold)
+            .filter(|(_, nx, _)| (px - nx).abs() < x_threshold)
             .min_by(|(_, _, ay), (_, _, by)| (py - ay).abs().total_cmp(&(py - by).abs()));
         if let Some((nname, _, ny)) = nearest {
             compared += 1;
@@ -131,7 +136,7 @@ mod tests {
 
     #[test]
     fn devices_in_different_columns_are_not_compared() {
-        // x_threshold = 100. Pair separated by 200 → no comparison, no violation.
+        // x_threshold = 60 (symbol width). Pair separated by 200 → no comparison.
         let mut s = Schematic::new("");
         s.components.push(comp("M1", "pmos4", 0.0, 100.0));
         s.components.push(comp("M2", "nmos4", 200.0, 0.0));

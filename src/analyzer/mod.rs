@@ -52,11 +52,26 @@ impl CircuitAnalyzer {
     }
 
     pub fn analyze(&self, devices: &[SpiceDevice], opts: &ClusterOptions) -> Vec<FunctionalBlock> {
+        let power_nets = self.identify_power_nets(devices);
+        self.analyze_with_power_nets(devices, opts, &power_nets)
+    }
+
+    /// Like `analyze`, but with a caller-supplied power-net set. Used when
+    /// the netlist declares extra rails via `* n2s: power_net <name>`
+    /// directives (audit item C1: internally regulated rails, e.g. an LDO
+    /// output, that neither the hardcoded list nor the V-source-terminal
+    /// rule can discover).
+    pub fn analyze_with_power_nets(
+        &self,
+        devices: &[SpiceDevice],
+        opts: &ClusterOptions,
+        power_nets: &HashSet<String>,
+    ) -> Vec<FunctionalBlock> {
         if devices.is_empty() {
             return Vec::new();
         }
 
-        let power_nets = self.identify_power_nets(devices);
+        let power_nets = power_nets.clone();
         let mut assigned: HashSet<usize> = HashSet::new();
         let mut blocks = Vec::new();
 

@@ -29,6 +29,11 @@ pub struct ParseResult {
     pub includes: Vec<String>,
     pub parameters: HashMap<String, String>,
     pub warnings: Vec<String>,
+    /// Extra power-net names declared via `* n2s: power_net <name>...`
+    /// comment directives — rails the hardcoded list and the
+    /// V-source-terminal rule cannot discover (audit item C1, e.g. an
+    /// LDO's regulated output used as a supply).
+    pub extra_power_nets: Vec<String>,
 }
 
 pub struct SpiceParser {
@@ -57,7 +62,29 @@ impl SpiceParser {
             includes: Vec::new(),
             parameters: HashMap::new(),
             warnings: Vec::new(),
+            extra_power_nets: Vec::new(),
         };
+
+        // Tool directives hidden in comments: `* n2s: power_net <n> [<n>...]`.
+        // Scanned over raw lines because comment lines never reach the
+        // device-parsing loop below.
+        for line in spice_text.lines() {
+            let t = line.trim();
+            let Some(rest) = t.strip_prefix('*') else {
+                continue;
+            };
+            let rest = rest.trim_start();
+            let lower = rest.to_lowercase();
+            let Some(body) = lower.strip_prefix("n2s:") else {
+                continue;
+            };
+            let mut toks = body.split_whitespace();
+            if toks.next() == Some("power_net") {
+                for name in toks {
+                    result.extra_power_nets.push(name.to_string());
+                }
+            }
+        }
 
         let raw_lines: Vec<&str> = spice_text.lines().collect();
         let merged = Self::merge_continuation_lines(&raw_lines);
@@ -197,6 +224,7 @@ impl SpiceParser {
                     includes: Vec::new(),
                     parameters: HashMap::new(),
                     warnings: vec![format!("Cannot open file: {}: {}", path, e)],
+                    extra_power_nets: Vec::new(),
                 };
                 r.warnings = r.warnings.clone();
                 r
