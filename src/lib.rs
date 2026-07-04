@@ -68,8 +68,11 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
         (&pr.devices, syms)
     } else if has_subckt_defs && pr.devices.is_empty() {
         // Subckt-only mode: the netlist defines a subckt but has no
-        // top-level devices. Render the first subckt's interior.
-        (&pr.subcircuits[0].devices, HashMap::new())
+        // top-level devices. Render the first subckt's interior. The
+        // interior may instantiate OTHER locally-defined subckts (OpenRAM
+        // hierarchies do), so build symbols for all local defs — real
+        // port names beat the numbered-pin fallback below.
+        (&pr.subcircuits[0].devices, build_subcircuit_symbols(&pr))
     } else {
         // Simple mode: top-level devices only
         (&pr.devices, HashMap::new())

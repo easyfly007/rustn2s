@@ -211,10 +211,18 @@ outside the current corpus — see prerequisites):
 
 ## 6. Prerequisites and risks
 
-- **Two test cases are not a design basis.** Before Phase 1 lands,
-  add ≥2 more large netlists from different authors (ngspice
-  examples, an OpenROAD/ORFS gate-level dump, a Berkeley course
-  design) so gate extraction isn't shaped by one SAR controller.
+- **Two test cases are not a design basis.** ✅ Batch 4 (2026-07-04)
+  added cases 42/43 from OpenRAM-generated SRAM netlists (third
+  author): a 131-instance hierarchical decoder tree and a
+  130-instance replica bitcell column. The column case renders as a
+  clean regular array (quality 0.775) already; the decoder scores
+  0.331 (crossing storm in a single-layer grid). Both exposed a new
+  known gap: **library subckt boxes have unknowable port
+  directions**, so gate-level blocks form zero DAG edges
+  (dag_edges=0, one flat layer). Phase 1's extracted gates don't
+  have this problem — the template match itself identifies the
+  output net. For library boxes it remains open (possible future
+  `n2s: output_port` directive).
 - **Gate-extraction correctness**: a wrong match renders a wrong box.
   Mitigation: match conservatively (exact template shapes only),
   label boxes with the matched function so errors are visible, and
