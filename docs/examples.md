@@ -506,6 +506,20 @@ Case 46 paid out twice: (1) two same-model stdcell buffers scattered across the 
 
 ---
 
+## Batch 6 (47–49): AudioDAC + the Berkeley Classics
+
+Added 2026-07-04. Sixth author: the **original UC Berkeley SPICE test decks** (shipped in the ngspice repository's `tests/general/`).
+
+| # | Circuit | Source | What it adds |
+|---|---------|--------|--------------|
+| 47 | Audio DAC, post-PnR | xschem `audiodac.spice` | **4256 instances — 3.6× the previous record**; 2879 fillers → 1377 logic cells after the physical filter; converts in 1.2 s, first-run Tier 1 PASS with zero fixes needed — the strongest generalization evidence for the scale machinery yet |
+| 48 | RCA 3040 wideband amp | Berkeley SPICE2 deck (`rca3040.cir`) | Oldest circuit in the corpus (1966): 11 BJTs, dual ±15 V supplies, all-numeric nets |
+| 49 | MOS amplifier | Berkeley SPICE2 deck (`mosamp.cir`) | 27-FET NMOS-only (depletion-load era) opamp; model name literally `m`, bulk on numeric bias net `32` — the C2 combination in a real historical netlist (all-NMOS, so the default is accidentally right) |
+
+Batch lesson (self-inflicted): prepending the metadata header demotes the original SPICE **title line** out of line 1, and a title starting with a device letter parses as a device — case 48 grew a resistor named `rca3040`, case 49 a MOSFET named `mosamp`. Embedded original titles must be commented out; the headers now say so.
+
+---
+
 ## Batch Run
 
 Generate all schematics at once:

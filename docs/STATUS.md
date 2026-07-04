@@ -13,20 +13,24 @@ before you feel tempted to tune any constant.
 
 ## Where things stand
 
-**State**: stable. Working tree clean, 173 tests pass, all commits
-pushed to `origin/main`. The full 46-case convert+eval sweep runs in
-**0.6 s** total.
+**State**: stable. Working tree clean, 173 tests pass (~9 s: the
+test profile builds with opt-level 1 because integration tests now
+convert a 4256-instance netlist), all commits pushed to
+`origin/main`. The full 49-case convert+eval sweep runs in ~2 s.
 
-**Test set**: 46 circuits in `tests/examples/`, five authors:
+**Test set**: 49 circuits in `tests/examples/`, six authors:
 - 01–25: MySchematic C++ suite + hand-written adversarial cases;
 - 26–36: real netlists from the sibling `myadc` SAR-ADC repo;
 - 37–39: SkyWater sky130 stdcell library cells;
 - 40–41: hand-written audit probes (C1 LDO rail, C2 opaque models);
 - 42–43: OpenRAM-generated SRAM decoder + replica column;
 - 44–46: ngspice distribution examples + xschem Verilog-import
-  post-PnR multiplier (1188 instances, the scale record).
+  post-PnR multiplier;
+- 47–49: xschem audiodac (4256 instances, the scale record —
+  first-run PASS, 1.2 s) + two original UC Berkeley SPICE2 decks
+  (RCA 3040, 1966; the mosamp NMOS opamp).
 
-All 46 pass Tier 1 safety, deterministically (every HashMap-ordered
+All 49 pass Tier 1 safety, deterministically (every HashMap-ordered
 decision point that affects geometry now iterates sorted keys; Tier 2
 scores still jitter a little on a few circuits — case 16 flips
 between 0.575/0.647 run to run).
@@ -83,12 +87,13 @@ the findings doc or scale_placement.md):
 
 ## What's left (in priority order)
 
-1. **Corpus growth / periodic re-validation** — five authors and 46
-   cases is good; every new netlist style still finds something.
-   Untapped and known-reachable: `audiodac.spice` (4 896 lines, same
-   xschem flow), xschem `.sch` designs (need xschem to netlist),
-   Berkeley course circuits (network access works in this
-   environment — batch 5 fetched ngspice examples from GitHub raw).
+1. **Corpus growth / periodic re-validation** — six authors and 49
+   cases; batch 6 (audiodac + Berkeley decks) found only one
+   self-inflicted footgun (embedded title lines parse as devices
+   when a header displaces them from line 1 — comment them out).
+   Untapped: xschem `.sch` designs (need xschem to netlist), more
+   Berkeley decks (`schmitt.cir`, `diffpair.cir` in ngspice
+   tests/general), sky130_fd_sc_hvl cells.
 2. **True channel routing** — only if the last ~36 congestion label
    stubs on case 36 or trunk-crossing aesthetics ever matter enough;
    `routing_improvement.md` explains why the payoff shrank.

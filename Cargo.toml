@@ -24,3 +24,9 @@ path = "src/bin/eval.rs"
 [[bin]]
 name = "n2s-improve"
 path = "src/bin/improve.rs"
+
+# The integration tests convert every example netlist, including the
+# 4256-instance post-PnR cases; unoptimized builds make that ~20 s per
+# test. Light optimization keeps the test loop fast.
+[profile.test]
+opt-level = 1
