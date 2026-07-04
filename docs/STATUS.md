@@ -93,9 +93,17 @@ added OpenRAM cases 42/43 as the prerequisite.)
 a 2 930 x 10 570 banded page, shape 0.10 → 0.81 — plus kind-sorted
 grid distribution for bus alignment, polarity class as primary key.)
 
-1. **Scale Phase 3 / routing**: A* per routing_improvement.md;
-   cross=0.00 at scale is now purely the routing half's problem.
-2. **More external sources** — ngspice examples, Berkeley circuits.
+(Scale Phase 3 landed 2026-07-04: high-fanout nets label-routed,
+adaptive threshold capped, and A* auto-on at scale. Scoreboard:
+29: 0.26→0.41, 36: 0.27→0.47, 42: 0.98, 43: 0.95. The scale campaign
+in scale_placement.md is complete through Phase 3.)
+
+1. **More external sources** — ngspice examples, Berkeley circuits.
+2. **Routing Phase C (channel routing)** — the remaining headroom on
+   case 36 (113 through-body wires where A* has no path, detour
+   crossings); see routing_improvement.md.
+3. **C2 real fix** — model-card lookup or an `n2s:` polarity hint
+   directive (case 41 keeps the gap visible).
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

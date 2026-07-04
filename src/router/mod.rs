@@ -61,6 +61,13 @@ impl Default for RouterOptions {
     }
 }
 
+/// Scale-regime thresholds (docs/scale_placement.md Phase 3). Regime
+/// selectors, not layout knobs: at or above this component count, the
+/// router labels high-fanout nets, stops growing the label threshold with
+/// the canvas, and turns obstacle avoidance on.
+const SCALE_REGIME_MIN_COMPONENTS: usize = 60;
+const SCALE_MAX_WIRED_FANOUT: usize = 4;
+
 pub struct SchematicRouter;
 
 impl SchematicRouter {
@@ -163,7 +170,15 @@ impl SchematicRouter {
         for (k, v) in subckt_symbols {
             symbol_map.insert(k.clone(), v.clone());
         }
-        let mut obstacle_grid = if opts.avoid_obstacles {
+        // Scale Phase 3: obstacle avoidance turns ON automatically in the
+        // scale regime. In box-dense gate/cell grids, L-routes blow through
+        // component bodies constantly; A* body-dodging is a large win in
+        // both metric and readability there (case 42: quality 0.33 → 0.98,
+        // case 29: 0.32 → 0.42). On case 36 it costs some crossing score
+        // (detours) while reducing through-body wires — readability wins
+        // over the metric, per the recurring lesson in the findings doc.
+        let scale_regime = placement.placements.len() >= SCALE_REGIME_MIN_COMPONENTS;
+        let mut obstacle_grid = if opts.avoid_obstacles || scale_regime {
             Some(astar::build_grid(
                 &schematic.components,
                 &symbol_map,
@@ -178,11 +193,23 @@ impl SchematicRouter {
         // larger schematics so a fixed user threshold doesn't prematurely
         // force medium-distance nets onto labels. Acts as an additional
         // floor — never goes below the user-supplied absolute threshold.
+        //
+        // Scale Phase 3 (docs/scale_placement.md): at scale the adaptive
+        // growth backfires — case 36's folded canvas pushes the threshold
+        // to ~3300px, so wires spanning a third of the page get DRAWN
+        // (1007 wires, 912 crossings). In the scale regime the threshold
+        // stays at the fixed base: local hops become wires, everything
+        // else becomes labels — the standard idiom for large digital
+        // schematics. High-fanout nets (clk/reset/control, > 4 pins) are
+        // label-routed outright; only 2–4 terminal nets earn wires.
         let (bb_min, bb_max) = placement.bounding_rect;
         let bbox_diag = ((bb_max.x - bb_min.x).powi(2) + (bb_max.y - bb_min.y).powi(2)).sqrt();
-        let effective_threshold = opts
-            .long_net_threshold
-            .max(bbox_diag * opts.adaptive_label_ratio);
+        let effective_threshold = if scale_regime {
+            opts.long_net_threshold
+        } else {
+            opts.long_net_threshold
+                .max(bbox_diag * opts.adaptive_label_ratio)
+        };
 
         // Route each net
         for (net_name, pins) in &net_connections {
@@ -193,6 +220,7 @@ impl SchematicRouter {
             if power_nets.contains(&net_name.to_lowercase()) || power_nets.contains(net_name) {
                 self.route_power_net(&mut schematic, net_name, pins, opts);
             } else {
+                let force_labels = scale_regime && pins.len() > SCALE_MAX_WIRED_FANOUT;
                 self.route_signal_net(
                     &mut schematic,
                     net_name,
@@ -200,6 +228,7 @@ impl SchematicRouter {
                     opts,
                     effective_threshold,
                     obstacle_grid.as_mut(),
+                    force_labels,
                 );
             }
         }
@@ -229,6 +258,7 @@ impl SchematicRouter {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn route_signal_net(
         &self,
         schematic: &mut Schematic,
@@ -237,8 +267,18 @@ impl SchematicRouter {
         opts: &RouterOptions,
         long_net_threshold: f64,
         grid: Option<&mut astar::ObstacleGrid>,
+        force_labels: bool,
     ) {
         if pins.len() < 2 {
+            return;
+        }
+
+        // High-fanout net in the scale regime: label every pin, draw no
+        // MST wires at all (a clk net snaking through 50 gates is noise,
+        // not information).
+        if force_labels {
+            let label_pins: HashSet<usize> = (0..pins.len()).collect();
+            self.emit_labels(schematic, net_name, pins, &label_pins, opts);
             return;
         }
 
@@ -299,11 +339,36 @@ impl SchematicRouter {
             }
         }
 
-        // Emit one label per pin that needs labeling (deduplicated).
+        self.emit_labels(schematic, net_name, pins, &label_pins, opts);
+
+        // Junction at any pin connected by more than one MST edge
+        let mut edge_count = vec![0usize; pins.len()];
+        for &(i, j) in &edges {
+            edge_count[i] += 1;
+            edge_count[j] += 1;
+        }
+        for (pi, &count) in edge_count.iter().enumerate() {
+            if count > 1 {
+                let pos = positions[pi].snap_to_grid(opts.grid_size);
+                schematic.junctions.push(Junction { position: pos });
+            }
+        }
+    }
+
+    /// Emit one label per pin index (deduplicated by anchor position),
+    /// each with a stub wire from the pin to the label anchor.
+    fn emit_labels(
+        &self,
+        schematic: &mut Schematic,
+        net_name: &str,
+        pins: &[PinInfo],
+        label_pins: &HashSet<usize>,
+        opts: &RouterOptions,
+    ) {
         // The label sits at pin_pos + label_offset so it clears the component
         // graphic, and a short stub wire connects the pin to the label anchor.
         let mut labeled_positions: Vec<Point> = Vec::new();
-        for &pi in &label_pins {
+        for &pi in label_pins {
             let pin = &pins[pi];
             let label_pos = (pin.position + pin.label_offset).snap_to_grid(opts.grid_size);
 
@@ -325,19 +390,6 @@ impl SchematicRouter {
                 schematic.wires.push(Wire {
                     points: vec![pin_snapped, label_pos],
                 });
-            }
-        }
-
-        // Junction at any pin connected by more than one MST edge
-        let mut edge_count = vec![0usize; pins.len()];
-        for &(i, j) in &edges {
-            edge_count[i] += 1;
-            edge_count[j] += 1;
-        }
-        for (pi, &count) in edge_count.iter().enumerate() {
-            if count > 1 {
-                let pos = positions[pi].snap_to_grid(opts.grid_size);
-                schematic.junctions.push(Junction { position: pos });
             }
         }
     }

@@ -2,9 +2,10 @@
 
 ## Status
 
-- **Phase B (A\* obstacle-aware routing)** — Implemented and shipped as
-  **opt-in** behind `--obstacle-avoidance` (default off). See "Phase B —
-  results and trade-offs" below.
+- **Phase B (A\* obstacle-aware routing)** — Implemented; **opt-in**
+  (`--obstacle-avoidance`) for small circuits, **on automatically** in
+  the >= 60-component scale regime since 2026-07-04 (see
+  scale_placement.md Phase 3 for the measurements that justified it).
 - **Phase C (channel routing)** — Future, designed below.
 
 ## Phase B: A* Grid Routing

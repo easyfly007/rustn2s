@@ -237,13 +237,41 @@ ones is untouched:
 Remaining for case 36: cross = 0.00 — now squarely the routing
 half's problem (Phase 3 / routing_improvement.md).
 
-### Phase 3 — routing at scale
+### Phase 3 — routing at scale — **LANDED 2026-07-04**
 
-Defer to `routing_improvement.md` (A* grid). Two scale notes for that
-work: the obstacle grid at 36's canvas is large (build once, share —
-already the design); and high-fanout nets (clk, reset, rails) must
-stay label-routed regardless of A* — only 2–4 terminal nets earn
-wires. The adaptive label threshold already points this direction.
+Three changes, all gated on the same >= 60-component scale regime:
+
+1. **High-fanout nets are label-routed outright** (> 4 pins): a clk
+   net snaking through 50 gates is noise, not information. This was
+   the big lever on case 36: 1 007 wires / 912 crossings → labels
+   for the hubs, wire ratio and crossings collapse.
+2. **The adaptive label threshold stops growing with the canvas** at
+   scale. It existed to keep medium circuits from premature labels,
+   but on 36's folded canvas it reached ~3 300 px — wires spanning a
+   third of the page were being DRAWN. At scale the threshold stays
+   at the fixed base (300): local hops are wires, everything else is
+   labels — the standard idiom for large digital schematics.
+3. **Obstacle avoidance (Phase B A*) turns on automatically** at
+   scale. In box-dense cell grids the L-router blows through
+   component bodies constantly; A* body-dodging is a large win in
+   both metric and readability (42: 0.33 → **0.98**, 43: 0.78 →
+   **0.95**, 29: 0.32 → 0.41). On 36 A* costs crossing score
+   (detours; quality 0.62 → 0.47) while reducing through-body wires
+   143 → 113 — readability wins over the metric, consistent with the
+   findings doc's recurring lesson. Runtime at 684 devices: 1.4 s.
+
+Scale-case scoreboard, start of day → end of Phase 3:
+
+| case | quality before | after | note |
+|---|---|---|---|
+| 29 | 0.26 | **0.41** | 33-layer ribbon → 2-layer gate page |
+| 36 | 0.27 | **0.47** | 678 singletons → banded gate-level page |
+| 42 | (new) | **0.98** | near-perfect decoder page |
+| 43 | (new) | **0.95** | clean bitcell array |
+
+Remaining headroom on 36: the 113 through-body wires (A* falls back
+to L-route when the grid has no path) and detour crossings — that is
+Phase C (channel routing) territory in routing_improvement.md.
 
 ## 5. Acceptance criteria
 
