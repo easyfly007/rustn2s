@@ -297,18 +297,13 @@ No C dependencies. No runtime dependencies. Single static binary.
 
 ## Test Coverage
 
-Unit tests:
-- `parser::tests` — SPICE parsing for inverter, diff_pair
-- `analyzer::tests` — Inverter detection, diff pair + tail detection
+~164 tests as of 2026-07-04: unit tests across parser / analyzer / placer / router / eval modules, plus `tests/pipeline.rs` integration tests that auto-discover every `.sp` under `tests/examples/` (41 circuits) and require all of them to pass Tier 1 safety.
 
-Integration validation:
-- `inverter.sp` → SVG + JSON
-- `diff_pair.sp` → SVG + JSON
-- `twostage_opamp.sp` → SVG + JSON
-- `bandgap.sp` → SVG
-- `folded_cascode.sp` → SVG
-
-All test SPICE files from the MySchematic C++ test suite.
+The example corpus (see [examples.md](examples.md)):
+- 01–11 from the MySchematic C++ suite;
+- 12–25 adversarial expansion (2026-05-01);
+- 26–36 real-world circuits from the sibling `myadc` SAR-ADC repo (two batches, 2026-06-15 / 2026-07-03);
+- 37–41 batch 3 (2026-07-04): sky130 stdcell netlists + hand-written C1/C2 audit probes.
 
 ---
 
@@ -316,9 +311,9 @@ All test SPICE files from the MySchematic C++ test suite.
 
 A standalone binary that reads the original SPICE netlist and generated JSON schematic, then outputs structured JSON metrics. See [examples.md](examples.md) for test circuits and evaluation results.
 
-### Nine metric modules
+### Ten metric modules
 
-The `eval` module computes nine independent metrics. These are the raw measurements; the two-tier API below groups them by what they actually mean.
+The `eval` module computes ten independent metrics. These are the raw measurements; the two-tier API below groups them by what they actually mean.
 
 | Metric | Description |
 |--------|-------------|
@@ -330,14 +325,15 @@ The `eval` module computes nine independent metrics. These are the raw measureme
 | `bounding_box` | Width, height, area, aspect ratio |
 | `label_usage` | Label pairs vs direct wires ratio |
 | `symmetry` | Matched device pair placement score (0–1) |
-| `power_convention` | PMOS-above-NMOS placement score (0–1) |
+| `power_convention` | PMOS-above-NMOS placement score (0–1); per-column, nearest-NMOS pairing |
+| `text_overlap` | Text readability: net labels / instance captions colliding with text or symbol bodies (added 2026-07-04) |
 
 ### Two-tier evaluation API (2026-05-01 metric reform)
 
 The original design combined all nine metrics into a single weighted sum (`compute_score(report, weights) → f64`). The [metric reform](metric_reform.md) showed this conflates three incompatible questions — *is the layout buggy?*, *is its shape conventional?*, and *is the routing readable?* — into one uninformative number, where 45% of the weight budget (`overlap`, `symmetry`, `power_convention`) never varies on bug-free output. `evaluate()` now returns two separate structures:
 
 - **Tier 1 — `SafetyReport { no_overlap, power_convention_clean, symmetry_clean }`.** Hard pass/fail booleans. A failure means a real bug (overlapping components, wrong-polarity stacking, misaligned matched pairs), not a low score. Every circuit in the current suite passes Tier 1.
-- **Tier 2 — `QualityProfile { aspect_ratio, crossings, wire_length, label_ratio }`.** Continuous values in `[0, 1]`, reported separately rather than summed. `aspect_ratio` is treated as a **shape signal**, not a quality metric — a legitimately wide signal chain shouldn't be penalized — so the comparators `worst_quality()` and `quality_score()` exclude it.
+- **Tier 2 — `QualityProfile { aspect_ratio, crossings, wire_length, label_ratio, text_clarity }`.** Continuous values in `[0, 1]`, reported separately rather than summed. `aspect_ratio` is treated as a **shape signal**, not a quality metric — a legitimately wide signal chain shouldn't be penalized — so the comparators `worst_quality()` and `quality_score()` exclude it. `text_clarity` (added 2026-07-04) participates in the lex-min comparators but is deliberately **not** in the `quality_score` weighted sum — it has no tuned weight and the overfitting audit warns against inventing one.
 
 **Back-compat:** the legacy `compute_score()` and `ScoreWeights` are unchanged, so existing consumers see identical scores. `n2s-eval --profile` emits the split (`safety=PASS | shape=… | cross=… wire=… lbl=… → quality=… | overall=…`); `n2s-eval --pretty` emits the full JSON report. `n2s-improve --lex-min` short-circuits on Tier 1 failure and optimizes the worst Tier 2 quality sub-score first (lexicographic min), ignoring the shape bias.
 
@@ -356,6 +352,17 @@ The suite grew from 11 to 25 circuits on 2026-05-01 (see [test_set_expansion_fin
 The placer is essentially done for this suite; the remaining quality ceiling is all in the router.
 
 ---
+
+## Post-reform changes (2026-07-03 → 07-04)
+
+Landed after the metric reform; details and reasoning in [test_set_expansion_findings.md](test_set_expansion_findings.md):
+
+- **Synthesized box symbols for X instances without a local `.subckt`** (PDK primitives): pins on box edges, numbered per node position. Fixed the labels-printed-on-boxes defect; placer templates budget real footprints via `subckt_box_size`.
+- **X-FET port semantics** (`SpiceParser::infer_x_transistor_type`): `sky130_fd_pr__*fet`-style X instances get (drain, gate, source, bulk) semantics — DAG direction, layering, and PMOS-top polarity sorting now work on all-X netlists.
+- **Overlap metric sees subckt boxes** (was builtin-only — boxes could overlap invisibly), and the placer's alignment passes collide against the *same* symbol rects the metric checks.
+- **`text_clarity` metric**: mirrors the SVG renderer's text geometry; the readability signal every earlier score missed.
+- **Netlist directives**: `* n2s: power_net <name>` declares rails the hardcoded list / V-terminal rule can't discover (audit C1, e.g. LDO-regulated rails).
+- **Placer determinism**: matched-pair alignment iterates sorted keys to a bounded fixpoint; Tier 1 results are stable across runs.
 
 ## TODO: Improvement Roadmap
 
