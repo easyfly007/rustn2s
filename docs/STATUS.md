@@ -83,12 +83,18 @@ pattern matching on, case 29 transformed (33 layers → 2). Decision
 from the re-measure: case 36 still needs Phase 1 — see
 scale_placement.md for the numbers.)
 
-1. **Scale Phase 1** (`docs/scale_placement.md`): CMOS gate
-   extraction → collapse to boxes → existing Sugiyama at gate
-   granularity. Prerequisite first: ≥2 more large netlists from
-   other authors.
-2. **More external sources** — ngspice distribution examples,
-   Berkeley course circuits; doubles as the Phase 1 prerequisite.
+(Scale Phase 1 landed 2026-07-04: `analyzer::gates` extracts
+INV/NAND/NOR by channel-graph matching — exact on case 32's ground
+truth — and collapses them to real-direction boxes in the scale
+regime. Case 36: 173 gates, layers 131→67, canvas halved. Batch 4
+added OpenRAM cases 42/43 as the prerequisite.)
+
+1. **Scale Phase 2** (`docs/scale_placement.md`): depth folding for
+   delay chains (36's remaining 67 layers are partly REAL
+   inverter-string depth) + bus alignment for identical-gate groups.
+2. **Scale Phase 3 / routing**: A* per routing_improvement.md;
+   cross=0.00 at scale is now the routing half's problem.
+3. **More external sources** — ngspice examples, Berkeley circuits.
 
 ### Avoid (unchanged from the 2026-05-01 audit)
 

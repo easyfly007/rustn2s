@@ -151,7 +151,41 @@ Results:
   ends, each blocked by a legitimate neighbor).
 - Runtime at 684 devices: 0.19 s (HAC now runs to completion).
 
-### Phase 1 — CMOS gate extraction (the structural answer to RC4)
+### Phase 1 — CMOS gate extraction — **LANDED 2026-07-04 (v1)**
+
+Implemented as `analyzer::gates` (channel-graph template matching,
+D/S order-agnostic, conservative isolation rules). Results:
+
+- Ground truth: case 32's documented composition (5 NOR2 + 2 NAND2 +
+  1 INV, 30 FETs) is recovered exactly; unit tests cover INV/NAND2
+  (swapped D/S)/NOR3 plus rejection of leaky stack nets and
+  mismatched gate sets.
+- Case 36: **173 gates extracted (130 INV, 41 NAND2, 2 NOR2), 63%
+  FET coverage** — the uncovered 252 FETs are OpenRAM-style custom
+  latch/dynamic cells, correctly rejected by the conservative
+  templates. After collapse: 684 → 425 components, blocks 213 → 142,
+  layers 131 → 67, canvas width halved, txt 0.81 → 0.91. The bogus
+  56-FET "CurrentMirror" is gone (its members live inside gates now).
+- Regime gates: `gate_collapse_min_devices = 60`,
+  `gate_collapse_min_coverage = 0.5`. The coverage default was
+  calibrated on the measured specimens — real digital measures 63%,
+  analog ≈0%, so 0.5 sits in a wide gap (the design's initial ~70%
+  guess was above the only real digital data point).
+- Eval visibility: synthetic gates carry an `n2s_ports` property so
+  the eval symbol table can size their boxes without re-running
+  extraction — overlap/text metrics are not blind to them.
+- Synthetic gates have REAL port direction (nodes[0] = the matched
+  output net), so the gate-level DAG works — unlike library boxes
+  (cases 42/43, dag_edges=0).
+
+**Not yet at the acceptance bar**: 67 layers (target ≤ 40) and
+cross = 0.00 remain. Two causes, both anticipated: genuine deep
+delay chains (36 contains blank_delay/prop_delay inverter strings —
+a 15-inverter chain IS 15 layers deep until Phase 2 folds it) and
+routing at scale (Phase 3). Phase 1's structural goal — gate-level
+granularity feeding the existing pipeline — is met.
+
+Original design (for reference):
 
 A transistor-level structural matcher, run before HAC:
 

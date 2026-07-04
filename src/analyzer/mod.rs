@@ -1,3 +1,5 @@
+pub mod gates;
+
 use crate::parser::{SpiceDevice, SpiceParser};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -26,6 +28,13 @@ pub struct ClusterOptions {
     pub merge_threshold: f64,
     pub max_cluster_size: usize,
     pub recognize_patterns: bool,
+    /// Scale-regime gates for CMOS gate collapse (docs/scale_placement.md
+    /// Phase 1). These are REGIME selectors, not layout knobs: collapse
+    /// engages only when the netlist is at least this big AND at least
+    /// this fraction of its transistors match gate templates. Analog
+    /// circuits fail the coverage test and keep the transistor-level path.
+    pub gate_collapse_min_devices: usize,
+    pub gate_collapse_min_coverage: f64,
 }
 
 impl Default for ClusterOptions {
@@ -34,6 +43,12 @@ impl Default for ClusterOptions {
             merge_threshold: 0.5,
             max_cluster_size: 6,
             recognize_patterns: true,
+            gate_collapse_min_devices: 60,
+            // Calibrated on the one real specimen of each regime: the flat
+            // SAR logic (case 36) measures 63% template coverage (the rest
+            // is custom latch/dynamic cells, correctly rejected); analog
+            // circuits measure ~0%. 0.5 sits in the wide gap between.
+            gate_collapse_min_coverage: 0.5,
         }
     }
 }
@@ -613,6 +628,19 @@ impl CircuitAnalyzer {
         // a lone sky130_fd_pr__*fet block has no I/O nets, no DAG edges,
         // and floats in a column of its own (case 34's XPT tail header).
         let is_x_fet = SpiceParser::infer_x_transistor_type(dev).is_some();
+        // Synthetic gate boxes (scale Phase 1): nodes are [output, inputs...]
+        // by construction — the template match identified the output net.
+        if dev.model_or_value.starts_with("gate__") {
+            if !power_nets.contains(&dev.nodes[0].to_lowercase()) {
+                block.output_nets.push(dev.nodes[0].clone());
+            }
+            for n in dev.nodes.iter().skip(1) {
+                if !power_nets.contains(&n.to_lowercase()) && !block.input_nets.contains(n) {
+                    block.input_nets.push(n.clone());
+                }
+            }
+            return;
+        }
         // Transistor I/O: gate/base is an input, drain/collector an output,
         // and the source/emitter is ALSO an input — a series stack or a
         // tail-fed pair consumes current at its source pin, and without
@@ -727,6 +755,14 @@ impl CircuitAnalyzer {
                     // stack) — classify it as an input so that driver's
                     // drain output has a consumer in the DAG.
                     if dev.nodes.len() >= 3 && dev.nodes[2] == *net {
+                        is_input = true;
+                    }
+                } else if dev.model_or_value.starts_with("gate__") {
+                    // Synthetic gate boxes: [output, inputs...] by construction.
+                    if dev.nodes[0] == *net {
+                        is_output = true;
+                    }
+                    if dev.nodes.iter().skip(1).any(|n| n == net) {
                         is_input = true;
                     }
                 }

@@ -8,7 +8,7 @@ pub mod router;
 
 use analyzer::{CircuitAnalyzer, ClusterOptions};
 use model::{builtin_symbols, Schematic};
-use parser::ParseResult;
+use parser::{ParseResult, SpiceDevice};
 use placer::{PlacerOptions, SchematicPlacer};
 use router::{RouterOptions, SchematicRouter};
 use std::collections::HashMap;
@@ -78,6 +78,39 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
         (&pr.devices, HashMap::new())
     };
 
+    if devices.is_empty() {
+        return Err("No devices found in SPICE input".into());
+    }
+
+    // 2. Analyze
+    let analyzer = CircuitAnalyzer::new();
+    let mut power_nets = analyzer.identify_power_nets(devices);
+    // Rails declared in-netlist via `* n2s: power_net <name>` directives
+    // (audit item C1: e.g. an LDO's regulated output used as a supply).
+    for net in &pr.extra_power_nets {
+        power_nets.insert(net.to_lowercase());
+    }
+
+    // Scale Phase 1 (docs/scale_placement.md): on large, gate-dominated
+    // netlists, collapse recognized CMOS gates into synthetic box devices
+    // so the pipeline runs at gate granularity. Small or analog netlists
+    // fail the regime gates inside try_collapse and are untouched.
+    let collapsed = analyzer::gates::try_collapse(
+        devices,
+        &power_nets,
+        opts.cluster.gate_collapse_min_devices,
+        opts.cluster.gate_collapse_min_coverage,
+    );
+    let devices: &[SpiceDevice] = match &collapsed {
+        Some(c) => {
+            for (k, v) in &c.symbols {
+                subckt_symbols.insert(k.clone(), v.clone());
+            }
+            &c.devices
+        }
+        None => devices,
+    };
+
     // Synthesize a generic box symbol for every X instance whose subcircuit
     // is NOT defined in this file (typical for PDK primitives resolved via
     // .lib/.include, e.g. sky130_fd_pr__nfet_01v8). Port names are unknown,
@@ -93,18 +126,6 @@ pub fn convert_full(spice_text: &str, opts: &ConvertOptions) -> Result<ConvertRe
         });
     }
 
-    if devices.is_empty() {
-        return Err("No devices found in SPICE input".into());
-    }
-
-    // 2. Analyze
-    let analyzer = CircuitAnalyzer::new();
-    let mut power_nets = analyzer.identify_power_nets(devices);
-    // Rails declared in-netlist via `* n2s: power_net <name>` directives
-    // (audit item C1: e.g. an LDO's regulated output used as a supply).
-    for net in &pr.extra_power_nets {
-        power_nets.insert(net.to_lowercase());
-    }
     let blocks = analyzer.analyze_with_power_nets(devices, &opts.cluster, &power_nets);
 
     // 3. Place (with device info for cross-block symmetry alignment)

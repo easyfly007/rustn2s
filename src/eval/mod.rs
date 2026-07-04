@@ -47,7 +47,7 @@ pub struct EvalReport {
 /// collected from the top level AND every subckt interior, so it covers
 /// whichever device slice the pipeline actually rendered. Geometric checks
 /// (overlap) need it to size box components; without it they are invisible.
-fn subckt_symbol_table(pr: &ParseResult) -> HashMap<String, SymbolDef> {
+fn subckt_symbol_table(pr: &ParseResult, schematic: &Schematic) -> HashMap<String, SymbolDef> {
     let mut map = HashMap::new();
     for sub in &pr.subcircuits {
         map.insert(
@@ -67,11 +67,30 @@ fn subckt_symbol_table(pr: &ParseResult) -> HashMap<String, SymbolDef> {
             builtin_symbols::create_subcircuit_symbol(&dev.model_or_value, &ports)
         });
     }
+    // Synthetic gate boxes (scale Phase 1) exist only in the schematic,
+    // not in the netlist — they self-describe their port count via the
+    // `n2s_ports` property so geometric checks can size them.
+    for comp in &schematic.components {
+        if !comp.symbol_name.starts_with("subckt_gate__") {
+            continue;
+        }
+        let model = comp.symbol_name.strip_prefix("subckt_").unwrap_or("gate");
+        let n_ports = comp
+            .properties
+            .iter()
+            .find(|(k, _)| k == "n2s_ports")
+            .and_then(|(_, v)| v.parse::<usize>().ok())
+            .unwrap_or(3);
+        map.entry(comp.symbol_name.clone()).or_insert_with(|| {
+            let ports: Vec<String> = (1..=n_ports).map(|i| i.to_string()).collect();
+            builtin_symbols::create_subcircuit_symbol(model, &ports)
+        });
+    }
     map
 }
 
 pub fn evaluate(parse_result: &ParseResult, schematic: &Schematic) -> EvalReport {
-    let subckt_symbols = subckt_symbol_table(parse_result);
+    let subckt_symbols = subckt_symbol_table(parse_result, schematic);
     EvalReport {
         connectivity: connectivity::check(parse_result, schematic),
         component_overlap: overlap::check(schematic, &subckt_symbols),
